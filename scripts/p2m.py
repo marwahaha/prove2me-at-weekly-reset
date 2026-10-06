@@ -526,8 +526,11 @@ def cmd_mirror(api: Api, cfg: dict, args) -> None:
 
 
 def _run(cmd: list[str], timeout_min: int) -> tuple[int, str]:
+    # elan installs lake/lean into ~/.elan/bin, which non-login shells on a
+    # fresh cloud VM don't have on PATH.
+    env = {**os.environ, "PATH": f"{Path.home() / '.elan' / 'bin'}{os.pathsep}{os.environ.get('PATH', '')}"}
     try:
-        p = subprocess.run(cmd, cwd=WS, capture_output=True, text=True, timeout=timeout_min * 60)
+        p = subprocess.run(cmd, cwd=WS, env=env, capture_output=True, text=True, timeout=timeout_min * 60)
         return p.returncode, (p.stdout + p.stderr)
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout_min} min"
