@@ -1,0 +1,24 @@
+{
+  "weekly_reset": { "day": "thursday", "time": "10:00", "timezone": "Asia/Jerusalem" },
+  "lead_hours": [10, 5],
+
+  "dry_run": true,
+  "max_claims_per_run": 3,
+  "max_submissions_per_run": 3,
+  "minutes_per_claim": 40,
+  "build_timeout_minutes": 20,
+  "allow_disproofs": true,
+  "allow_sketches": true,
+
+  "selection": {
+    "sources": ["saved", "missions", "search"],
+    "mission_ids": [],
+    "tags": [],
+    "query": "",
+    "sort": "votes",
+    "max_statement_chars": 1500,
+    "skip_flagged": true,
+    "skip_attempted_by_me": true,
+    "pool_size": 15
+  }
+}

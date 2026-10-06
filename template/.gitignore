@@ -1,0 +1,4 @@
+# Per-run scratch
+.autoprover/
+credentials.json
+.DS_Store

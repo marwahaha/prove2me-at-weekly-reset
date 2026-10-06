@@ -1,0 +1,13 @@
+# Secrets: never commit
+credentials.json
+.env
+
+# Per-run scratch and run logs (logs belong in each user's private data repo)
+.autoprover/
+logs/
+
+# Local design brief (contains a local credentials path)
+HANDOFF.md
+
+__pycache__/
+.DS_Store
