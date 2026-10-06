@@ -48,8 +48,12 @@ IMPORT_LINE = re.compile(r"^\s*(?:(?:public|private|meta)\s+)*import\s+([^\n]+)"
 MAX_MIRRORED_MODULES = 80
 
 DEFAULT_CONFIG = {
-    "weekly_reset": {"day": "thursday", "time": "10:00", "timezone": "UTC"},
-    "lead_hours": [10, 5],
+    # Usage gate (`p2m usage`): run only in the last `lead_hours` before the weekly
+    # Claude limit resets, and never near a limit or on paid overage.
+    "lead_hours": 12,
+    "stop_at_utilization": 0.97,
+    "stop_on_overage": True,
+    "allow_unknown_usage": False,
     "dry_run": True,
     "max_claims_per_run": 3,
     "max_submissions_per_run": 3,
@@ -690,26 +694,167 @@ def cmd_record(api: Api, cfg: dict, args) -> None:
     print("recorded")
 
 
+ROUTINE_CRON = "7 */6 * * *"
+
+
 def cmd_schedule(api: Api | None, cfg: dict, args) -> None:
-    """Turn weekly_reset + lead_hours from the config into cron lines (UTC)."""
-    from zoneinfo import ZoneInfo
-    r = cfg["weekly_reset"]
-    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-    tz = ZoneInfo(r["timezone"])
-    hh, mm = map(int, r["time"].split(":"))
-    today = dt.datetime.now(tz).replace(hour=hh, minute=mm, second=0, microsecond=0)
-    reset = today + dt.timedelta(days=(days.index(r["day"].lower()) - today.weekday()) % 7)
-    out = []
-    for lead in cfg["lead_hours"]:
-        start = (reset - dt.timedelta(hours=lead)).astimezone(dt.timezone.utc)
-        start += dt.timedelta(minutes=7)  # schedulers start late exactly on the hour
-        cron_dow = (start.weekday() + 1) % 7  # cron: 0 = Sunday
-        out.append({"lead_hours": lead,
-                    "local_start": (start.astimezone(tz)).strftime("%A %H:%M %Z"),
-                    "cron_utc": f"{start.minute} {start.hour} * * {cron_dow}"})
-    print(json.dumps({"weekly_reset": f"{r['day']} {r['time']} {r['timezone']}", "runs": out}, indent=2))
-    print("Note: a run that starts within ~1h of a daylight-saving change can be off by an hour.",
-          file=sys.stderr)
+    """Print the recommended routine schedule. Runs self-gate with `p2m usage`."""
+    print(json.dumps({"cron_utc": ROUTINE_CRON, "lead_hours": _lead_hours(cfg)}, indent=2))
+    print(f"Schedule the routine every 6 hours ({ROUTINE_CRON}). Each run first calls `p2m usage`\n"
+          f"and does real work only when the weekly Claude limit resets within lead_hours\n"
+          f"({_lead_hours(cfg):g} h), no window is at stop_at_utilization, and no paid overage is in use.\n"
+          f"Other runs exit within a minute.", file=sys.stderr)
+
+
+# ---------------------------------------------------------------- usage gate
+
+def _claude_bin() -> str | None:
+    import shutil
+    found = shutil.which("claude")
+    if found:
+        return found
+    fallback = Path("/opt/claude-code/bin/claude")
+    return str(fallback) if fallback.exists() else None
+
+
+def _epoch(v) -> float | None:
+    """Epoch seconds from epoch seconds/ms or an ISO string."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return v / 1000 if v > 1e12 else float(v)
+    if isinstance(v, str):
+        try:
+            return _epoch(float(v))
+        except ValueError:
+            try:
+                return dt.datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return None
+    return None
+
+
+def _fraction(d: dict) -> float | None:
+    """Utilization as a 0..1 fraction (accepts utilization or used_percentage variants)."""
+    for k in ("utilization", "used_fraction"):
+        if isinstance(d.get(k), (int, float)) and not isinstance(d.get(k), bool):
+            return float(d[k])
+    for k in ("used_percentage", "usedPercentage", "utilization_percentage", "percent_used"):
+        if isinstance(d.get(k), (int, float)) and not isinstance(d.get(k), bool):
+            return float(d[k]) / 100
+    return None
+
+
+def _window(d: dict) -> dict:
+    reset = _epoch(next((d[k] for k in ("resetsAt", "resets_at", "resetAt", "reset_at") if k in d), None))
+    out = {"utilization": _fraction(d), "resets_at": None, "hours_left": None}
+    if reset is not None:
+        out["resets_at"] = dt.datetime.fromtimestamp(reset, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        out["hours_left"] = round((reset - time.time()) / 3600, 1)
+    return out
+
+
+def parse_rate_limit(text: str) -> dict:
+    """Pull the last rate_limit_event out of `claude --output-format stream-json` output.
+
+    Returns {five_hour, seven_day, is_using_overage, status}; raises ValueError if absent.
+    """
+    info = None
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(ev, dict):
+            continue
+        cand = ev.get("rate_limit_info") or ev.get("rateLimitInfo")
+        if isinstance(cand, dict):
+            info = cand
+    if info is None:
+        raise ValueError("no rate_limit_event in claude output")
+    windows: dict[str, dict] = {}
+    unified = info.get("unifiedWindows") or info.get("unified_windows")
+    if isinstance(unified, dict):
+        for name, w in unified.items():
+            if isinstance(w, dict):
+                windows[name.replace("-", "_")] = _window(w)
+    if not windows:
+        name = str(info.get("rateLimitType") or info.get("rate_limit_type") or "unknown").replace("-", "_")
+        windows[name] = _window(info)
+    overage = info.get("isUsingOverage", info.get("is_using_overage"))
+    return {"five_hour": windows.get("five_hour"), "seven_day": windows.get("seven_day"),
+            "other_windows": {k: v for k, v in windows.items() if k not in ("five_hour", "seven_day")} or None,
+            "is_using_overage": bool(overage) if overage is not None else None,
+            "status": info.get("status")}
+
+
+def _lead_hours(cfg: dict) -> float:
+    lead = cfg.get("lead_hours", 12)
+    if isinstance(lead, list):  # old form: one entry per scheduled run
+        lead = max(lead) if lead else 12
+    return float(lead)
+
+
+def usage_decision(u: dict, cfg: dict, ignore_window: bool = False) -> dict:
+    """go/no-go for the usage dict from parse_rate_limit. `kind` is ok|overage|limit|window|unknown."""
+    stop = float(cfg.get("stop_at_utilization", 0.97))
+    if cfg.get("stop_on_overage", True) and u.get("is_using_overage"):
+        return {"go": False, "kind": "overage", "reason": "Claude account is using paid overage (extra usage)"}
+    windows = {k: u[k] for k in ("five_hour", "seven_day") if u.get(k)}
+    windows.update(u.get("other_windows") or {})
+    for name, w in windows.items():
+        if w.get("utilization") is not None and w["utilization"] >= stop:
+            return {"go": False, "kind": "limit",
+                    "reason": f"{name} usage at {w['utilization']:.0%} >= stop_at_utilization {stop:.0%}"}
+    if not ignore_window:
+        lead = _lead_hours(cfg)
+        left = (u.get("seven_day") or {}).get("hours_left")
+        if left is None:
+            return {"go": False, "kind": "unknown", "reason": "usage unknown: weekly reset time not reported"}
+        if left > lead:
+            return {"go": False, "kind": "window", "reason": f"weekly reset in {left:g} h > lead_hours {lead:g}"}
+    return {"go": True, "kind": "ok", "reason": "within the pre-reset window and below the usage limits"
+            if not ignore_window else "below the usage limits (lead window ignored)"}
+
+
+def _probe_usage() -> str:
+    exe = _claude_bin()
+    if not exe:
+        raise RuntimeError("claude CLI not found on PATH or at /opt/claude-code/bin/claude")
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDECODE",)}  # allow a nested -p call
+    STATE.mkdir(parents=True, exist_ok=True)
+    try:
+        p = subprocess.run([exe, "-p", "Reply with OK", "--model", "haiku", "--max-turns", "1",
+                            "--output-format", "stream-json", "--verbose"],
+                           cwd=STATE, env=env, capture_output=True, text=True, timeout=180,
+                           stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("claude probe timed out after 180 s")
+    if "rate_limit" not in p.stdout:
+        tail = (p.stderr or p.stdout).strip().splitlines()[-1:] or [""]
+        raise RuntimeError(f"claude probe exited {p.returncode} without a rate_limit_event: {tail[0][:200]}")
+    return p.stdout
+
+
+def cmd_usage(api: Api | None, cfg: dict, args) -> None:
+    """Probe Claude usage limits and print a go/no-go decision. Exit 0 go, 6 no-go, 7 unknown."""
+    ignore_window = os.environ.get("AUTOPROVER_IGNORE_WINDOW", "").lower() in ("1", "true", "yes")
+    out: dict = {}
+    try:
+        text = Path(args.from_file).read_text() if args.from_file else _probe_usage()
+        out = parse_rate_limit(text)
+        decision = usage_decision(out, cfg, ignore_window)
+    except (RuntimeError, ValueError, OSError) as e:
+        decision = {"go": False, "kind": "unknown", "reason": f"usage unknown: {e}"}
+    if decision["kind"] == "unknown" and cfg.get("allow_unknown_usage"):
+        decision = {"go": True, "kind": "unknown", "reason": decision["reason"] + " (allowed by allow_unknown_usage)"}
+    out["decision"] = decision
+    ledger_append({"event": "usage", **out})
+    print(json.dumps(out, indent=2))
+    sys.exit(0 if decision["go"] else 7 if decision["kind"] == "unknown" else 6)
 
 
 def cmd_summary(api: Api | None, cfg: dict, args) -> None:
@@ -767,7 +912,9 @@ def main() -> None:
     s.add_argument("theorem_name")
     s.add_argument("--status", default="GAVE_UP", choices=["GAVE_UP", "SKIPPED", "OUT_OF_TIME", "USAGE_LIMIT"])
     s.add_argument("--note", default="")
-    sub.add_parser("schedule", help="print cron lines for the configured weekly reset and lead times")
+    sub.add_parser("schedule", help="print the recommended routine schedule (runs self-gate)")
+    s = sub.add_parser("usage", help="probe Claude usage limits; exit 0 go, 6 no-go, 7 unknown (JSON)")
+    s.add_argument("--from-file", help=argparse.SUPPRESS)  # parse saved stream-json output (tests)
     s = sub.add_parser("summary", help="write logs/<run>.md, .jsonl and dry-run solutions to the data repo")
     s.add_argument("--stop-reason", default="")
     args = p.parse_args()

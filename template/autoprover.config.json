@@ -1,6 +1,8 @@
 {
-  "weekly_reset": { "day": "thursday", "time": "10:00", "timezone": "Asia/Jerusalem" },
-  "lead_hours": [10, 5],
+  "lead_hours": 12,
+  "stop_at_utilization": 0.97,
+  "stop_on_overage": true,
+  "allow_unknown_usage": false,
 
   "dry_run": true,
   "max_claims_per_run": 3,

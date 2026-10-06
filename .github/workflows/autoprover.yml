@@ -32,14 +32,10 @@ name: autoprover
 
 on:
   schedule:
-    # Cron times are UTC. Regenerate both lines with:
-    #     python3 scripts/p2m.py schedule
-    # (from autoprover.config.json: weekly_reset + lead_hours). The values below were
-    # generated for "thursday 10:00 Asia/Jerusalem", lead hours [10, 5], during Israeli
-    # summer time (IDT). After the clocks change, rerun the command and update them.
+    # Cron times are UTC. Every 6 hours: each run first calls `p2m usage` and does real
+    # work only in the last lead_hours before the weekly Claude reset (see the README).
     # GitHub often starts scheduled runs 10-30+ minutes late; that is expected.
-    - cron: "7 21 * * 3"   # 10 h before the weekly reset (Wed 21:07 UTC)
-    - cron: "7 2 * * 4"    #  5 h before the weekly reset (Thu 02:07 UTC)
+    - cron: "7 */6 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

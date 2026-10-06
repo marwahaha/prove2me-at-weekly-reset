@@ -7,7 +7,7 @@ Everything runs in the cloud, as a [Claude Code routine](https://code.claude.com
 > **Status: early.** The maintainer is testing it on their own account first. Routines are a research-preview feature of Claude Code, so details can change. Issues and pull requests are welcome.
 
 > [!WARNING]
-> **Paid extra usage.** If "extra usage" / usage credits are enabled on your Claude account or organization, a run can continue on metered overage after your subscription allowance runs out, **and you will be charged**. The agent is instructed to stop at the first usage-limit message, but treat that as best effort. Turn extra usage off at [claude.ai/settings/usage](https://claude.ai/settings/usage) before enabling live runs. On Team and Enterprise plans, an admin does this at claude.ai/admin-settings/usage.
+> **Paid extra usage.** If "extra usage" / usage credits are enabled on your Claude account or organization, a run can continue on metered overage after your subscription allowance runs out, **and you will be charged**. Every run checks your usage before it starts and again before each claim and each submission, and stops if the account is on paid overage or close to a limit (see *Usage gate* below). That check is a strong safeguard but not a guarantee: usage can still overshoot between two checks. Turn extra usage off at [claude.ai/settings/usage](https://claude.ai/settings/usage) before enabling live runs. On Team and Enterprise plans, an admin does this at claude.ai/admin-settings/usage.
 
 ## One user, one setup
 
@@ -26,7 +26,7 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
 ## How a run works
 
 ```
- weekly reset − 10h and − 5h        (two runs: the 5-hour window also caps usage)
+ every 6 hours
           │
           ▼
  routine starts a fresh cloud VM, clones YOUR private data repo + this tool repo
@@ -35,12 +35,23 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
  prepare.sh    write Prove2me credentials, re-pin the environment, finish Lean setup
           │
  Claude, following prompts/routine.md:
+   p2m.py usage       go only if the weekly limit resets within lead_hours (else stop quietly)
    p2m.py candidates  shortlist from your saved list / missions / search, per your config
    p2m.py fetch       mirror the target and every platform module it imports
    write Solutions/Sol_<name>.lean, loop on  p2m.py check
    p2m.py submit      re-runs every check, then submits (or stops here in dry run)
    p2m.py summary     logs/<run>.md + .jsonl → committed and pushed to your data repo
 ```
+
+### Usage gate
+
+The routine fires every 6 hours, but almost every run stops right away. `p2m.py usage` makes one tiny Haiku call and reads the rate-limit information Claude Code reports with it: how much of the 5-hour and the weekly window is used, and when each resets. A run goes ahead only if:
+
+- the weekly limit resets within `lead_hours` (default 12), so only allowance that would expire unused gets spent;
+- neither window is at `stop_at_utilization` (default 97%);
+- the account is not on paid overage (`stop_on_overage`, default on).
+
+If the usage can't be read, the run stops (unless you set `allow_unknown_usage`). The check is repeated before each new claim and before each submission. Runs stopped only because the reset is still far away leave no commit in your data repo; every other run pushes its log.
 
 All Prove2me traffic goes through [`scripts/p2m.py`](scripts/p2m.py), so the safety rules are enforced in code, not only requested in the prompt.
 
@@ -74,8 +85,8 @@ On prove2.me, log in, open the account menu and click **API key**. Your secret v
 1. Create a **private** GitHub repo, e.g. `prove2me-autoprover-data`.
 2. Copy the files from [`template/`](template/) into it.
 3. Edit `autoprover.config.json`:
-   - **`weekly_reset`:** when your weekly Claude limit resets. Find it with `/usage` in Claude Code, or at claude.ai/settings/usage. Give a day, a time and an IANA timezone.
-   - **`lead_hours`:** default `[10, 5]`, meaning two runs, 10h and 5h before the reset.
+   - **`lead_hours`:** default `12`. Runs do real work only in the last 12 hours before your weekly Claude limit resets. The tool reads the reset time itself, so there is nothing to look up.
+   - **`stop_at_utilization`** and **`stop_on_overage`:** the other usage-gate settings. The defaults are sensible.
    - **`selection`:** what to attempt.
      - `sources` can include `saved` (your saved list on prove2.me, the easiest way to steer it), `missions` (the open leaves of the `mission_ids` you list) and `search` (`query`, `tags`, `sort`).
      - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
@@ -115,9 +126,7 @@ Create the routine at [claude.ai/code/routines](https://claude.ai/code/routines)
 - **Prompt:** paste [`prompts/routine-trigger.md`](prompts/routine-trigger.md). It locates both clones and hands over to the full instructions in [`prompts/routine.md`](prompts/routine.md).
 - **Model:** use the selector by the prompt. Opus is the strongest prover; Sonnet uses less allowance.
 - **Connectors:** remove all. The routine needs none.
-- **Schedule:** weekly. To get the cron lines, run `python3 scripts/p2m.py schedule` in a clone of this repo, with `AUTOPROVER_CONFIG` pointing at your config. Set them with `/schedule update`.
-  - Pick a few minutes past the hour, since on-the-hour runs can start late.
-  - Re-check after daylight-saving changes.
+- **Schedule:** every 6 hours, a few minutes past the hour: cron `7 */6 * * *` (`python3 scripts/p2m.py schedule` prints it). Set it with `/schedule update`. The usage gate decides which runs do real work, so there is nothing to adjust for your reset time or daylight saving.
 
 Then click **Run now** once, open the run to watch it, and check `logs/` in your data repo.
 
@@ -152,6 +161,7 @@ export PROVE2ME_CREDENTIALS_FILE=/path/to/credentials.json
 export AUTOPROVER_DATA=/path/to/your-data-repo      # config + logs
 bash scripts/setup.sh && bash scripts/prepare.sh
 python3 scripts/p2m.py status
+python3 scripts/p2m.py usage                         # go/no-go; AUTOPROVER_IGNORE_WINDOW=1 skips the lead-window rule
 python3 scripts/p2m.py candidates
 python3 scripts/p2m.py fetch <theorem_id>
 python3 scripts/p2m.py solution <submission_id>        # read an earlier attempt
@@ -172,7 +182,7 @@ AUTOPROVER_DRY_RUN=true python3 scripts/p2m.py submit <theorem_id> <file> --expl
 ## Limitations
 
 - **One environment per run.** Only theorems in Prove2me's default Lean/Mathlib environment are attempted.
-- **Allowance is invisible to the agent.** It can't see how much allowance you have left. A run that starts with none left stops at the first usage-limit message.
+- **Usage is checked, not metered.** The gate reads usage at a few points in a run. Between two checks a long claim can use more than expected, and a run that hits a limit mid-claim stops at the first usage-limit message.
 - **Local type check can be skipped.** It is skipped when the solution and target files declare the same helper names. The Prove2me server still checks the type.
 - **Setup cache expires weekly.** The environment's cache lasts about 7 days, so weekly runs usually start by re-downloading part of Mathlib, which takes several minutes.
 
