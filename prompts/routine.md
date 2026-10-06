@@ -30,20 +30,21 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    work: `p2m record <id> <name> --status USAGE_LIMIT --note "..."` for the claim in progress
    (if any), then go straight to steps 3 to 5 with `--stop-reason "Claude usage limit reached"`.
    Do not retry, sleep, or wait for a reset. The same applies whenever `p2m usage` (the usage
-   gate) exits non-zero during the run: use its `decision.reason` as the stop reason.
+   gate) exits non-zero during the run, and whenever `p2m check` or `p2m submit` exits 6 (their
+   built-in usage checkpoint): use the printed `decision.reason` / usage-gate reason as the stop
+   reason. Never try to work around the usage gate.
 6. Long commands: the Bash tool times out. Run anything that may exceed ~5 minutes
    (`prepare.sh`, `p2m check`, `p2m submit`, `lake build`) in the background with output
    redirected to a file under `.autoprover/`, then poll the file (and `ps`) every minute or two.
 
 ## Step 0: prepare
 
-1. Usage gate (first, before any setup, so most runs end in seconds): `p2m usage > .autoprover/usage.json; echo $?`.
-   Exit 0 means go. Exit 6 (no-go)
-   or 7 (usage unknown): run `p2m summary --stop-reason "<decision.reason>"`, then steps 4
-   and 5, and stop. Step 4 skips `decision.kind` `window`: the routine fires every 6 hours and
-   most runs end here with "weekly reset in N h > lead_hours", which must not produce a commit
-   (nor a notification; `summary` already prints `NOTIFY: NONE` for it). Other no-go reasons
-   (limit, overage, unknown) are worth a log, so push those.
+1. Usage gate (first, before any setup): `p2m usage > .autoprover/usage.json; echo $?`.
+   Exit 0 means go. Exit 6 (no-go) or 7 (usage unknown): run `p2m summary --stop-reason
+   "<decision.reason>"`, then steps 4 and 5, and stop. The routine is scheduled once a week,
+   just inside the last `lead_hours` before the weekly reset, so a `decision.kind` of `window`
+   here means the schedule is misaligned: `summary` then prints a `NOTIFY:` line telling the
+   user the corrected schedule. Send it as usual; never try to fix the schedule yourself.
 2. `bash "$AUTOPROVER_TOOL/scripts/prepare.sh" > .autoprover/prepare.log 2>&1; echo $?`
    (in the background, polling, if it runs long). Exit codes:
    - `3`: credentials problem. Run `p2m summary --stop-reason "Prove2me credentials missing or
@@ -66,10 +67,14 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
 2. Pick up to `max_claims_per_run`, preferring short `statement_chars`, high `closability`, few
    `platform_imports`, and statements you can see a route to. Work on them one at a time.
 
-## Step 2: per claim (at most `minutes_per_claim` wall-clock minutes each)
+## Step 2: per claim (at most `claim_budget_minutes` wall-clock minutes each)
 
-Before starting each claim (including the first), run `p2m usage`. If it exits non-zero, do
-not start the claim: stop as in hard rule 5 (steps 3 to 5, stop reason `decision.reason`).
+Before starting each claim (including the first), run
+`p2m usage --for start-claim > .autoprover/usage_claim.json; echo $?`. It is stricter than the
+run-start check (a claim may only start well below the caps). If it exits non-zero, do not
+start the claim: stop as in hard rule 5 (steps 3 to 5, stop reason `decision.reason`).
+Otherwise its `claim_budget_minutes` is this claim's time budget (at most `minutes_per_claim`,
+less when the weekly reset is near).
 
 Record the start with `date +%s` and check elapsed time with `date +%s` before every build.
 When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
@@ -118,7 +123,9 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
      trusting memory. Paste only the final term/tactic into the solution, never `exact?`.
    - Gate the solution: `p2m check <theorem_id> <solution_file> [--proof-type disprove]`
      (background + poll; it runs `lake build`, the sorry/axiom check and the type-match check).
-     Exit 0 means `ok: true`. On failure read `problems` and `build_log`, fix, repeat.
+     Exit 0 means `ok: true`. On failure read `problems` and `build_log`, fix, repeat. Exit 6
+     means the usage checkpoint said no-go (nothing was built): record the claim as
+     USAGE_LIMIT and stop as in hard rule 5.
    - If `type_match` reports "unchecked", compare your `solution` signature to the target file
      line by line before submitting.
    - Tactics worth trying: `simp`, `simp_all`, `omega`, `linarith`, `nlinarith [sq_nonneg ...]`,
@@ -133,13 +140,12 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
      lemma asserts and why the reduction is valid. Cite the source. Blank lines between
      paragraphs. KaTeX only (`$...$`, `$$...$$`). No remarks about yourself, the platform,
      attempts, or adjectives like "elegant". No tactic-by-tactic transcript.
-   - Run `p2m usage` first. If it exits non-zero, do not submit: `p2m record <theorem_id>
-     <theorem_name> --status USAGE_LIMIT --note "passed local checks; <decision.reason>"`, then
-     steps 3 to 5 with that reason.
    - `p2m submit <theorem_id> <solution_file> [--proof-type disprove] --explanation-file
-     .autoprover/expl_<slug>.md` (background + poll; it re-runs every gate, respects `dry_run`
-     and the submission cap, and polls the verdict). Exit 5 = cap reached: stop submitting. A
-     result of `DRY_RUN` or a server verdict ends the claim.
+     .autoprover/expl_<slug>.md` (background + poll; it probes usage, re-runs every gate,
+     respects `dry_run` and the submission cap, and polls the verdict). Exit 5 = cap reached:
+     stop submitting. Exit 6 = usage no-go, nothing sent: `p2m record <theorem_id>
+     <theorem_name> --status USAGE_LIMIT --note "passed local checks; <reason>"`, then steps 3
+     to 5 with that reason. A result of `DRY_RUN` or a server verdict ends the claim.
    - On `CE`/`WA`/`FAILED` with time left, you may fix and resubmit once; otherwise record.
 8. Giving up (no proof, out of time, statement looks ill-posed, too many imports, exit 4 from
    `fetch`/`mirror`): `p2m record <theorem_id> <theorem_name> --status
@@ -158,7 +164,8 @@ by one line `NOTIFY: <message or NONE>`. Every `p2m summary` call is followed by
 
 ## Step 4: publish the log
 
-- Skip this step for a step 0.1 stop with `decision.kind` `window` (nothing happened).
+- Skip this step for a step 0.1 stop with `decision.kind` `window` if `summary` printed
+  `NOTIFY: NONE` (nothing happened and nothing needs the user).
 - If `GITHUB_ACTIONS` is `true`, skip this step: the workflow commits and pushes the logs.
 - Otherwise, in `$AUTOPROVER_DATA`, commit only `logs/` and push it to the data repo's default
   branch (never a `claude/` branch, never anything outside `logs/`):

@@ -1,6 +1,11 @@
 {
-  "lead_hours": 12,
-  "stop_at_utilization": 0.97,
+  "lead_hours": 2,
+  "max_five_hour_utilization": 0.50,
+  "max_weekly_utilization": 0.80,
+  "claim_start_margin_five_hour": 0.10,
+  "claim_start_margin_weekly": 0.05,
+  "reset_buffer_minutes": 5,
+  "expect_window_on_schedule": true,
   "stop_on_overage": true,
   "allow_unknown_usage": false,
 

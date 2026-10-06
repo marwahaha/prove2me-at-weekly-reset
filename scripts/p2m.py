@@ -48,10 +48,20 @@ IMPORT_LINE = re.compile(r"^\s*(?:(?:public|private|meta)\s+)*import\s+([^\n]+)"
 MAX_MIRRORED_MODULES = 80
 
 DEFAULT_CONFIG = {
-    # Usage gate (`p2m usage`): run only in the last `lead_hours` before the weekly
-    # Claude limit resets, and never near a limit or on paid overage.
-    "lead_hours": 12,
-    "stop_at_utilization": 0.97,
+    # Usage gate (`p2m usage`, also enforced by `check` and `submit`): work only in
+    # the last `lead_hours` before the weekly Claude limit resets, never above the
+    # utilization caps (absolute fractions of each window), never on paid overage.
+    "lead_hours": 2,
+    "max_five_hour_utilization": 0.50,
+    "max_weekly_utilization": 0.80,
+    # A new claim may only start this far below the caps (0.40 and 0.75 by default).
+    "claim_start_margin_five_hour": 0.10,
+    "claim_start_margin_weekly": 0.05,
+    # Stop this many minutes before the weekly reset, so next week's allowance is untouched.
+    "reset_buffer_minutes": 5,
+    # The routine is scheduled once a week at (reset - lead_hours); a run outside the
+    # window then means the schedule is misaligned, which is notified.
+    "expect_window_on_schedule": True,
     "stop_on_overage": True,
     "allow_unknown_usage": False,
     "dry_run": True,
@@ -91,8 +101,26 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         user = json.loads(CONFIG_PATH.read_text())
         sel = user.pop("selection", {})
+        legacy = user.pop("stop_at_utilization", None)
         cfg.update(user)
         cfg["selection"].update(sel)
+        # Back-compat: the old single cap applies only where the new keys are absent,
+        # and can only lower the new defaults, never raise them.
+        if isinstance(legacy, (int, float)) and not isinstance(legacy, bool):
+            for key in ("max_five_hour_utilization", "max_weekly_utilization"):
+                if key not in user:
+                    cfg[key] = min(float(legacy), DEFAULT_CONFIG[key])
+    for key in ("max_five_hour_utilization", "max_weekly_utilization",
+                "claim_start_margin_five_hour", "claim_start_margin_weekly"):
+        v = cfg.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 1:
+            die(f"autoprover.config.json: {key} must be a number between 0 and 1, got {v!r}")
+    if isinstance(cfg.get("lead_hours"), list):  # old form: one entry per scheduled run
+        cfg["lead_hours"] = max(cfg["lead_hours"]) if cfg["lead_hours"] else DEFAULT_CONFIG["lead_hours"]
+    for key in ("lead_hours", "reset_buffer_minutes", "minutes_per_claim"):
+        v = cfg.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+            die(f"autoprover.config.json: {key} must be a non-negative number, got {v!r}")
     # Environment overrides, used by the GitHub Actions workflow inputs.
     if os.environ.get("AUTOPROVER_DRY_RUN"):
         cfg["dry_run"] = os.environ["AUTOPROVER_DRY_RUN"].lower() in ("1", "true", "yes")
@@ -637,7 +665,20 @@ def gate(api: Api | None, cfg: dict, theorem_id: str, sol: Path, proof_type: str
     return {**result, "ok": not problems, "problems": problems}
 
 
+def require_usage(cfg: dict, via: str, max_age_s: float) -> None:
+    """Usage checkpoint inside `check`/`submit`: exit 6 (doing no work) on a no-go."""
+    out, decision = evaluate_usage(cfg, "continue", max_age_s=max_age_s)
+    if out.get("source") == "probe" or not decision["go"]:
+        ledger_append({"event": "usage", "via": via, **out})
+    if not decision["go"]:
+        print(json.dumps({"ok": False, "usage_decision": decision}, indent=2))
+        print(f"ERROR: usage gate: {decision['reason']}; not running `{via}` "
+              "(stop the run as for a usage limit)", file=sys.stderr)
+        sys.exit(6)
+
+
 def cmd_check(api: Api, cfg: dict, args) -> None:
+    require_usage(cfg, "check", CHECK_USAGE_MAX_AGE_S)
     res = gate(api, cfg, args.theorem_id, Path(args.file), args.proof_type)
     ledger_append({"event": "check", **{k: v for k, v in res.items() if k != "build_log"}})
     print(json.dumps(res, indent=2, ensure_ascii=False))
@@ -651,6 +692,7 @@ def cmd_submit(api: Api, cfg: dict, args) -> None:
     submitted = [e for e in ledger() if e.get("event") == "submitted"]
     if not cfg["dry_run"] and len(submitted) >= cfg["max_submissions_per_run"]:
         die(f"max_submissions_per_run ({cfg['max_submissions_per_run']}) reached", 5)
+    require_usage(cfg, "submit", 0)  # always a fresh probe, dry run included
     # Re-run every gate on the exact bytes we are about to send.
     res = gate(api, cfg, args.theorem_id, sol, args.proof_type)
     if not res["ok"]:
@@ -698,16 +740,32 @@ def cmd_record(api: Api, cfg: dict, args) -> None:
     print("recorded")
 
 
-ROUTINE_CRON = "7 */6 * * *"
+SCHEDULE_OFFSET_MIN = 7  # fire a few minutes into the pre-reset window
+
+
+def recommended_schedule(resets_at: str, cfg: dict) -> dict:
+    """Weekly cron (UTC) for (weekly reset - lead_hours) + SCHEDULE_OFFSET_MIN minutes."""
+    reset = dt.datetime.fromtimestamp(_epoch(resets_at), dt.timezone.utc)
+    run = reset - dt.timedelta(hours=_lead_hours(cfg)) + dt.timedelta(minutes=SCHEDULE_OFFSET_MIN)
+    dow = (run.weekday() + 1) % 7  # cron counts days from 0 = Sunday
+    return {"cron_utc": f"{run.minute} {run.hour} * * {dow}",
+            "run_at_utc": run.strftime("%A %H:%M UTC"),
+            "run_at_local": run.astimezone().strftime("%A %H:%M %Z (this machine's time zone)"),
+            "weekly_resets_at": reset.strftime("%Y-%m-%dT%H:%M:%SZ")}
 
 
 def cmd_schedule(api: Api | None, cfg: dict, args) -> None:
-    """Print the recommended routine schedule. Runs self-gate with `p2m usage`."""
-    print(json.dumps({"cron_utc": ROUTINE_CRON, "lead_hours": _lead_hours(cfg)}, indent=2))
-    print(f"Schedule the routine every 6 hours ({ROUTINE_CRON}). Each run first calls `p2m usage`\n"
-          f"and does real work only when the weekly Claude limit resets within lead_hours\n"
-          f"({_lead_hours(cfg):g} h), no window is at stop_at_utilization, and no paid overage is in use.\n"
-          f"Other runs exit within a minute.", file=sys.stderr)
+    """Probe usage and print the weekly routine schedule: (weekly reset - lead_hours) + 7 min."""
+    out, decision = evaluate_usage(cfg, "continue", from_file=args.from_file)
+    resets_at = (out.get("seven_day") or {}).get("resets_at")
+    if not resets_at:
+        die(f"cannot compute the schedule, the weekly reset time is unknown ({decision['reason']})", 7)
+    s = recommended_schedule(resets_at, cfg)
+    print(json.dumps({**s, "lead_hours": _lead_hours(cfg)}, indent=2))
+    print(f"Schedule the routine once a week with cron `{s['cron_utc']}` (UTC): {s['run_at_utc']},\n"
+          f"which is {s['run_at_local']}. That is {_lead_hours(cfg):g} h before your weekly Claude limit\n"
+          f"resets, plus {SCHEDULE_OFFSET_MIN} minutes. Rerun this command if your reset time changes.",
+          file=sys.stderr)
 
 
 # ---------------------------------------------------------------- usage gate
@@ -796,35 +854,85 @@ def parse_rate_limit(text: str) -> dict:
 
 
 def _lead_hours(cfg: dict) -> float:
-    lead = cfg.get("lead_hours", 12)
+    lead = cfg.get("lead_hours", DEFAULT_CONFIG["lead_hours"])
     if isinstance(lead, list):  # old form: one entry per scheduled run
-        lead = max(lead) if lead else 12
+        lead = max(lead) if lead else DEFAULT_CONFIG["lead_hours"]
     return float(lead)
 
 
-def usage_decision(u: dict, cfg: dict, ignore_window: bool = False) -> dict:
-    """go/no-go for the usage dict from parse_rate_limit. `kind` is ok|overage|limit|window|unknown."""
-    stop = float(cfg.get("stop_at_utilization", 0.97))
+USAGE_CACHE = STATE / "usage_last.json"  # last real probe, reused briefly by `check`
+CHECK_USAGE_MAX_AGE_S = 180
+USAGE_MODES = ("start-claim", "continue")
+
+
+def _ignore_window() -> bool:
+    """AUTOPROVER_IGNORE_WINDOW=1 skips only the pre-reset window rule (tests, manual runs)."""
+    return os.environ.get("AUTOPROVER_IGNORE_WINDOW", "").lower() in ("1", "true", "yes")
+
+
+def _minutes_until(v) -> float | None:
+    t = _epoch(v)
+    return None if t is None else (t - time.time()) / 60
+
+
+def usage_decision(u: dict, cfg: dict, mode: str = "continue", ignore_window: bool = False) -> dict:
+    """go/no-go for the usage dict from parse_rate_limit. `kind` is ok|overage|unknown|window|limit.
+
+    mode "continue": every window strictly below its cap. mode "start-claim": every window
+    at most cap minus the start margin. Both: weekly reset within lead_hours and more than
+    reset_buffer_minutes away (unless ignore_window), no paid overage.
+    """
+    start = mode == "start-claim"
+    info: dict = {"mode": mode, "minutes_to_reset": None, "claim_budget_minutes": 0}
+
+    def no(kind: str, reason: str) -> dict:
+        return {"go": False, "kind": kind, "reason": reason, **info}
+
     if cfg.get("stop_on_overage", True) and u.get("is_using_overage"):
-        return {"go": False, "kind": "overage", "reason": "Claude account is using paid overage (extra usage)"}
-    windows = {k: u[k] for k in ("five_hour", "seven_day") if u.get(k)}
-    windows.update(u.get("other_windows") or {})
-    for name, w in windows.items():
-        if w.get("utilization") is not None and w["utilization"] >= stop:
-            return {"go": False, "kind": "limit",
-                    "reason": f"{name} usage at {w['utilization']:.0%} >= stop_at_utilization {stop:.0%}"}
-    if not ignore_window:
-        lead = _lead_hours(cfg)
-        left = (u.get("seven_day") or {}).get("hours_left")
-        if left is None:
-            return {"go": False, "kind": "unknown", "reason": "usage unknown: weekly reset time not reported"}
-        if left > lead:
-            return {"go": False, "kind": "window", "reason": f"weekly reset in {left:g} h > lead_hours {lead:g}"}
-    return {"go": True, "kind": "ok", "reason": "within the pre-reset window and below the usage limits"
-            if not ignore_window else "below the usage limits (lead window ignored)"}
+        return no("overage", "Claude account is using paid overage (extra usage)")
+    mtr = _minutes_until((u.get("seven_day") or {}).get("resets_at"))
+    if mtr is not None:
+        info["minutes_to_reset"] = round(mtr, 1)
+    for name in ("five_hour", "seven_day"):
+        if (u.get(name) or {}).get("utilization") is None:
+            return no("unknown", f"usage unknown: {name} utilization not reported")
+    mpc = float(cfg["minutes_per_claim"])
+    if ignore_window:
+        budget = mpc
+    else:
+        if mtr is None:
+            return no("unknown", "usage unknown: weekly reset time not reported")
+        lead, buf = _lead_hours(cfg), float(cfg["reset_buffer_minutes"])
+        if mtr > lead * 60:
+            return no("window", f"weekly reset in {mtr / 60:.1f} h > lead_hours {lead:g}")
+        budget = min(mpc, mtr - buf)
+        if budget < 1:
+            return no("window", f"weekly reset in {mtr:.0f} min, within reset_buffer_minutes {buf:g}")
+    five = (float(cfg["max_five_hour_utilization"]), float(cfg["claim_start_margin_five_hour"]))
+    week = (float(cfg["max_weekly_utilization"]), float(cfg["claim_start_margin_weekly"]))
+    windows = [("five_hour", u["five_hour"], *five), ("seven_day", u["seven_day"], *week)]
+    for name, w in (u.get("other_windows") or {}).items():  # e.g. per-model weekly windows
+        windows.append((name, w, *(five if "five_hour" in name else week)))
+    for name, w, cap, margin in windows:
+        x = (w or {}).get("utilization")
+        if x is None:
+            continue
+        x = round(x, 6)
+        if start and x > round(cap - margin, 6):
+            return no("limit", f"{name} usage at {x:.0%} > {cap - margin:.0%} "
+                               f"(a claim may start only {margin:.0%} below the {cap:.0%} cap)")
+        if x >= round(cap, 6):
+            return no("limit", f"{name} usage at {x:.0%} >= cap {cap:.0%}")
+    info["claim_budget_minutes"] = int(round(budget))
+    where = "below the usage caps (lead window ignored)" if ignore_window else \
+        "within the pre-reset window and below the usage caps"
+    return {"go": True, "kind": "ok", "reason": where, **info}
 
 
 def _probe_usage() -> str:
+    fixture = os.environ.get("AUTOPROVER_USAGE_FIXTURE")  # tests: inject a probe result
+    if fixture:
+        return Path(fixture).read_text()
     exe = _claude_bin()
     if not exe:
         raise RuntimeError("claude CLI not found on PATH or at /opt/claude-code/bin/claude")
@@ -843,20 +951,55 @@ def _probe_usage() -> str:
     return p.stdout
 
 
-def cmd_usage(api: Api | None, cfg: dict, args) -> None:
-    """Probe Claude usage limits and print a go/no-go decision. Exit 0 go, 6 no-go, 7 unknown."""
-    ignore_window = os.environ.get("AUTOPROVER_IGNORE_WINDOW", "").lower() in ("1", "true", "yes")
+def _read_usage(from_file: str | None, max_age_s: float) -> tuple[dict, str]:
+    """Parsed usage and its source: "file", "cache" (a probe at most max_age_s old) or "probe"."""
+    if from_file:
+        return parse_rate_limit(Path(from_file).read_text()), "file"
+    if max_age_s > 0:
+        try:
+            c = json.loads(USAGE_CACHE.read_text())
+            age = time.time() - float(c["probed_at"])
+            if 0 <= age <= max_age_s and isinstance(c["usage"], dict):
+                return c["usage"], "cache"
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    u = parse_rate_limit(_probe_usage())
+    STATE.mkdir(parents=True, exist_ok=True)
+    USAGE_CACHE.write_text(json.dumps({"probed_at": time.time(), "usage": u}))
+    return u, "probe"
+
+
+def evaluate_usage(cfg: dict, mode: str, from_file: str | None = None,
+                   max_age_s: float = 0) -> tuple[dict, dict]:
+    """(usage reading, decision). Any failure to read usage is a no-go of kind `unknown`."""
     out: dict = {}
     try:
-        text = Path(args.from_file).read_text() if args.from_file else _probe_usage()
-        out = parse_rate_limit(text)
-        decision = usage_decision(out, cfg, ignore_window)
-    except (RuntimeError, ValueError, OSError) as e:
-        decision = {"go": False, "kind": "unknown", "reason": f"usage unknown: {e}"}
+        u, source = _read_usage(from_file, max_age_s)
+        for w in [u.get("five_hour"), u.get("seven_day"), *(u.get("other_windows") or {}).values()]:
+            if isinstance(w, dict) and w.get("resets_at"):  # fresh for cached readings
+                w["hours_left"] = round(_minutes_until(w["resets_at"]) / 60, 1)
+        out = {**u, "source": source}
+        decision = usage_decision(u, cfg, mode, _ignore_window())
+    except Exception as e:  # never let a parsing bug turn into a go
+        decision = {"go": False, "kind": "unknown", "reason": f"usage unknown: {e}", "mode": mode,
+                    "minutes_to_reset": None, "claim_budget_minutes": 0}
     if decision["kind"] == "unknown" and cfg.get("allow_unknown_usage"):
-        decision = {"go": True, "kind": "unknown", "reason": decision["reason"] + " (allowed by allow_unknown_usage)"}
+        mtr = decision.get("minutes_to_reset")
+        budget = cfg["minutes_per_claim"] if mtr is None or _ignore_window() else \
+            min(cfg["minutes_per_claim"], mtr - cfg["reset_buffer_minutes"])
+        if budget >= 1:
+            decision = {**decision, "go": True, "claim_budget_minutes": int(round(budget)),
+                        "reason": decision["reason"] + " (allowed by allow_unknown_usage)"}
+    return out, decision
+
+
+def cmd_usage(api: Api | None, cfg: dict, args) -> None:
+    """Probe Claude usage limits and print a go/no-go decision. Exit 0 go, 6 no-go, 7 unknown."""
+    out, decision = evaluate_usage(cfg, args.mode, from_file=args.from_file)
+    out["minutes_to_reset"] = decision.get("minutes_to_reset")
+    out["claim_budget_minutes"] = decision.get("claim_budget_minutes", 0)
     out["decision"] = decision
-    ledger_append({"event": "usage", **out})
+    ledger_append({"event": "usage", "via": "usage", **out})
     print(json.dumps(out, indent=2))
     sys.exit(0 if decision["go"] else 7 if decision["kind"] == "unknown" else 6)
 
@@ -909,9 +1052,23 @@ NEEDS_USER_USAGE = {"overage": "Claude account is on paid overage; turn off extr
                     "unknown": "Claude usage could not be read, so the run stopped"}
 
 
+def _misaligned_text(usage_event: dict, cfg: dict) -> str:
+    resets = (usage_event.get("seven_day") or {}).get("resets_at")
+    if not resets:
+        return ("schedule is misaligned with your weekly reset; run `p2m schedule` and update "
+                "the routine schedule")
+    s = recommended_schedule(resets, cfg)
+    return (f"schedule is misaligned with your weekly reset (now resets {s['weekly_resets_at']}); "
+            f"update the routine schedule to `{s['cron_utc']}` (UTC, {s['run_at_utc']})")
+
+
 def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
                 needs_user: bool = False) -> str | None:
-    """The one-line notification for this run, or None. Never for lead-window no-go runs."""
+    """The one-line notification for this run, or None.
+
+    A run whose first usage decision is a `window` no-go notifies (the weekly schedule
+    is misaligned with the reset) unless expect_window_on_schedule is false.
+    """
     level = cfg.get("notify", "important")
     if level not in NOTIFY_LEVELS:
         print(f"warning: unknown notify setting {level!r}; using 'important'", file=sys.stderr)
@@ -920,12 +1077,18 @@ def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
         return None
     results = [e for e in events if e.get("event") == "result"]
     decisions = [e.get("decision") or {} for e in events if e.get("event") == "usage"]
-    if not results and any(d.get("kind") == "window" and not d.get("go") for d in decisions):
-        return None
+    first = next((e for e in events if e.get("event") == "usage"), {})
+    misaligned = None
+    if (first.get("decision") or {}).get("kind") == "window" and not first["decision"].get("go"):
+        if not cfg.get("expect_window_on_schedule", True):
+            if not results:
+                return None
+        else:
+            misaligned = _misaligned_text(first, cfg)
     log = f"Log: logs/{rid}.md"
     # Something only the user can fix.
-    attention = None
-    low = (stop_reason or "").lower()
+    attention = misaligned
+    low = (stop_reason or "").lower() if attention is None else ""
     for pat, msg in NEEDS_USER_PATTERNS:
         if pat in low:
             attention = msg or stop_reason
@@ -1021,7 +1184,8 @@ def main() -> None:
     s = sub.add_parser("solution", help="print the Lean source of an existing submission (read-only)")
     s.add_argument("submission_id")
     for name in ("check", "submit"):
-        s = sub.add_parser(name, help="run local gates" if name == "check" else "gate, then submit (or dry-run)")
+        s = sub.add_parser(name, help="usage checkpoint, then local gates" if name == "check"
+                           else "usage checkpoint, gates, then submit (or dry-run); exit 6 = usage no-go")
         s.add_argument("theorem_id")
         s.add_argument("file")
         s.add_argument("--proof-type", choices=["prove", "disprove"], default="prove")
@@ -1033,8 +1197,11 @@ def main() -> None:
     s.add_argument("theorem_name")
     s.add_argument("--status", default="GAVE_UP", choices=["GAVE_UP", "SKIPPED", "OUT_OF_TIME", "USAGE_LIMIT"])
     s.add_argument("--note", default="")
-    sub.add_parser("schedule", help="print the recommended routine schedule (runs self-gate)")
+    s = sub.add_parser("schedule", help="probe usage; print the weekly routine cron (reset - lead_hours)")
+    s.add_argument("--from-file", help=argparse.SUPPRESS)  # parse saved stream-json output (tests)
     s = sub.add_parser("usage", help="probe Claude usage limits; exit 0 go, 6 no-go, 7 unknown (JSON)")
+    s.add_argument("--for", dest="mode", choices=USAGE_MODES, default="continue",
+                   help="start-claim: caps minus the start margins; continue (default): the hard caps")
     s.add_argument("--from-file", help=argparse.SUPPRESS)  # parse saved stream-json output (tests)
     s = sub.add_parser("summary", help="write logs/<run>.md, .jsonl and dry-run solutions to the data repo")
     s.add_argument("--stop-reason", default="")
