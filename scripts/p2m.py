@@ -360,8 +360,19 @@ def _theorem_rows(api: Api, cfg: dict, env_rev: str) -> list[dict]:
             missions = sel["mission_ids"]
             if not missions:
                 continue  # missions are only used when the user names them
+            # There is no GET /missions/:id; page through the list instead.
+            wanted, found, offset = set(missions), {}, 0
+            while wanted - found.keys():
+                page = api.get("/missions", limit=50, offset=offset)["missions"]
+                found.update({m["id"]: m for m in page if m["id"] in wanted})
+                if len(page) < 50:
+                    break
+                offset += 50
             for mid in missions:
-                m = api.get(f"/missions/{mid}")
+                if mid not in found:
+                    print(f"warning: mission {mid} not found", file=sys.stderr)
+                    continue
+                m = found[mid]
                 root = (m.get("main_theorem") or {}).get("theorem_id")
                 if not root:
                     continue
