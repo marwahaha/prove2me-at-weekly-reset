@@ -2,9 +2,10 @@
 # prove2me-autoprover: per-run preparation. Idempotent; safe to rerun.
 #
 # 1. writes the Prove2me credentials from $PROVE2ME_CREDENTIALS (never echoed),
-# 2. finishes anything setup.sh could not (toolchain, Mathlib, cache),
-# 3. re-pins the workspace if Prove2me's default environment changed,
-# 4. smoke-tests that Lean + Mathlib load from the cache.
+# 2. re-pins the workspace if Prove2me's default environment changed,
+# 3. if Mathlib is already at the pinned rev and a quick smoke test passes, stops there
+#    (the usual case: no `lake update`, no cache download),
+# 4. otherwise finishes anything setup.sh could not (Mathlib, cache) and smoke-tests again.
 # Exit codes: 0 ready, 3 credentials missing/invalid, 1 Lean not ready.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -36,10 +37,24 @@ if ! python3 scripts/p2m.py pin-env >/dev/null; then
 fi
 TOOLCHAIN="$(cat "$WS/lean-toolchain")"
 command -v elan >/dev/null || bash "$REPO/scripts/setup.sh"
-retry elan toolchain install "$TOOLCHAIN" || { log "toolchain install failed"; exit 1; }
+elan toolchain list 2>/dev/null | grep -qF "$TOOLCHAIN" \
+  || retry elan toolchain install "$TOOLCHAIN" || { log "toolchain install failed"; exit 1; }
 
 cd "$WS"
 REV="$(grep -oE '[0-9a-f]{40}' lakefile.lean | head -1)"
+mkdir -p AutoproverCheck
+printf 'import Mathlib.Tactic.NormNum\nexample : (2:ℚ) + 2 = 4 := by norm_num\n' > AutoproverCheck/Smoke.lean
+# `lake env lean` builds nothing, so with a missing cache it fails fast instead of compiling
+# Mathlib; the timeout is a second guard against a long hang.
+smoke() { timeout -k 10 "$1" lake env lean AutoproverCheck/Smoke.lean; }
+
+# Fast path: toolchain installed, Mathlib at the pinned rev, cache loads. Skips the network.
+if [ "$(git -C .lake/packages/mathlib rev-parse HEAD 2>/dev/null)" = "$REV" ] \
+   && smoke 120 >/dev/null 2>&1; then
+  log "Lean + Mathlib already ready (cached) ($TOOLCHAIN, Mathlib ${REV:0:7})"
+  exit 0
+fi
+
 if [ "$(git -C .lake/packages/mathlib rev-parse HEAD 2>/dev/null)" != "$REV" ]; then
   log "fetching Mathlib $REV"
   retry lake update >/dev/null 2>&1 || { log "lake update failed"; exit 1; }
@@ -49,9 +64,7 @@ retry lake exe cache get >/dev/null 2>&1 || lake exe cache get! >/dev/null 2>&1 
   || { log "cache get failed"; exit 1; }
 
 # 4. Smoke test: should take seconds. If it starts compiling Mathlib, the cache missed.
-mkdir -p AutoproverCheck
-printf 'import Mathlib.Tactic.NormNum\nexample : (2:ℚ) + 2 = 4 := by norm_num\n' > AutoproverCheck/Smoke.lean
-if timeout 600 lake env lean AutoproverCheck/Smoke.lean; then
+if smoke 600; then
   log "Lean + Mathlib ready ($TOOLCHAIN, Mathlib ${REV:0:7})"
 else
   log "smoke test failed"; exit 1

@@ -32,7 +32,7 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
  routine starts a fresh cloud VM, clones YOUR private data repo + this tool repo
           │
  setup.sh      (cached by the environment) elan, Lean toolchain, prove2me_workspace, Mathlib cache
- prepare.sh    write Prove2me credentials, re-pin the environment, finish Lean setup
+ prepare.sh    write Prove2me credentials, re-pin the environment, quick Lean check (full setup only if it fails)
           │
  Claude, following prompts/routine.md:
    p2m.py usage       go only if the weekly limit resets within lead_hours (else stop quietly)
@@ -41,6 +41,7 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
    write Solutions/Sol_<name>.lean, loop on  p2m.py check
    p2m.py submit      re-runs every check, then submits (or stops here in dry run)
    p2m.py summary     logs/<run>.md + .jsonl → committed and pushed to your data repo
+   p2m.py notify      push notification / optional webhook, per your notify setting
 ```
 
 ### Usage gate
@@ -91,6 +92,7 @@ On prove2.me, log in, open the account menu and click **API key**. Your secret v
      - `sources` can include `saved` (your saved list on prove2.me, the easiest way to steer it), `missions` (the open leaves of the `mission_ids` you list) and `search` (`query`, `tags`, `sort`).
      - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
    - **`dry_run`:** keep it `true` until you've read a few logs.
+   - **`notify`:** when to send you a notification; see *Notifications* below.
 
 ### 3. Cloud environment
 
@@ -147,6 +149,31 @@ Outcomes:
 - **`DRY_RUN_PASSED_LOCAL_CHECKS`:** would have been submitted.
 - **`GAVE_UP`, `OUT_OF_TIME`, `USAGE_LIMIT`, `SKIPPED`:** nothing was submitted.
 
+## Notifications
+
+At the end of each run, the tool can tell you what happened. Set `notify` in `autoprover.config.json`:
+
+- **`important`** (default): only runs that submitted something (whatever the verdict), or that would have in dry run, and runs that stopped on something only you can fix: Prove2me key missing or expired, Lean setup failed, paid overage, usage unreadable, or a tool error.
+- **`every_run`**: also runs that attempted claims but submitted nothing.
+- **`off`**: no notifications. The logs are still written.
+
+The frequent runs that stop only because your weekly reset is still far away never notify.
+
+A message looks like `prove2me-autoprover: 2 accepted (theorem_a, theorem_b), 1 rejected (CE). Log: logs/<run_id>.md`, or `prove2me-autoprover needs you: Prove2me API key missing or rejected; ...`.
+
+**Push notification (default).** The agent sends the message as a Claude push notification. You receive it if the Claude mobile or desktop app is signed in to the same account with notifications turned on. If push isn't available in a run, nothing is sent; the log is always the full record.
+
+**Webhook (optional).** To get the same message in Slack, Discord or any phone via ntfy:
+
+1. Get a webhook URL:
+   - **Slack:** create an [incoming webhook](https://api.slack.com/messaging/webhooks) for a channel (`https://hooks.slack.com/services/...`).
+   - **Discord:** channel settings, *Integrations*, *Webhooks*, *New Webhook*, *Copy Webhook URL*.
+   - **ntfy:** pick a hard-to-guess topic name and subscribe to it in the [ntfy app](https://ntfy.sh); the URL is `https://ntfy.sh/<topic>`.
+2. Add it to the cloud environment's variables: `AUTOPROVER_WEBHOOK_URL=<url>`. Treat the URL as a secret, since anyone who has it can post to your channel. (The config key `notify_webhook_url` also works, but the data repo is the wrong place for a secret.)
+3. With **Custom** network access, add the webhook's domain to the environment's allowed domains: `hooks.slack.com`, `discord.com` or `ntfy.sh`.
+
+A failed webhook call only prints a warning; it never stops a run. Test it locally with `python3 scripts/p2m.py notify --message "test"`.
+
 ## Fallback: GitHub Actions
 
 If routines don't work for you, [`.github/workflows/autoprover.yml`](.github/workflows/autoprover.yml) runs the same prompt on GitHub's runners with [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action), authenticated with a `claude setup-token` token from your subscription.
@@ -166,6 +193,7 @@ python3 scripts/p2m.py candidates
 python3 scripts/p2m.py fetch <theorem_id>
 python3 scripts/p2m.py solution <submission_id>        # read an earlier attempt
 python3 scripts/p2m.py check <theorem_id> $PROVE2ME_WORKSPACE/Solutions/Sol_<name>.lean
+AUTOPROVER_WEBHOOK_URL=https://ntfy.sh/<topic> python3 scripts/p2m.py notify --message test
 AUTOPROVER_DRY_RUN=true python3 scripts/p2m.py submit <theorem_id> <file> --explanation-file expl.md
 ```
 
@@ -176,7 +204,7 @@ AUTOPROVER_DRY_RUN=true python3 scripts/p2m.py submit <theorem_id> <file> --expl
 | `prompts/routine.md` | the agent's full instructions |
 | `scripts/setup.sh` | environment setup script (cached) |
 | `scripts/bootstrap.sh` | future public path: download the tool at `AUTOPROVER_REF` (unused while private) |
-| `scripts/prepare.sh` | per run: credentials, environment pin, Mathlib cache, smoke test |
+| `scripts/prepare.sh` | per run: credentials, environment pin, smoke test; Mathlib update and cache only if the smoke test fails |
 | `scripts/p2m.py` | Prove2me client, claim selection, local gates, submission, logs |
 
 ## Limitations

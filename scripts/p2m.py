@@ -61,6 +61,10 @@ DEFAULT_CONFIG = {
     "allow_disproofs": True,
     "allow_sketches": True,
     "build_timeout_minutes": 20,
+    # Notifications: "important" (submissions, or a stop that needs the user),
+    # "every_run" (also runs that attempted claims but submitted nothing), "off".
+    "notify": "important",
+    "notify_webhook_url": "",  # prefer the AUTOPROVER_WEBHOOK_URL environment variable
     "selection": {
         "sources": ["saved", "missions", "search"],
         "mission_ids": [],
@@ -884,6 +888,123 @@ def cmd_summary(api: Api | None, cfg: dict, args) -> None:
     md = "\n".join(lines) + "\n"
     (LOGS / f"{rid}.md").write_text(md)
     print(md)
+    text = notify_text(events, cfg, rid, args.stop_reason, args.needs_user)
+    (STATE / "notify.txt").write_text(text or "")
+    print(f"NOTIFY: {text or 'NONE'}")
+
+
+# ---------------------------------------------------------------- notifications
+
+NOTIFY_LEVELS = ("important", "every_run", "off")
+ACCEPTED = {"ACCEPTED", "SKETCH_ACCEPTED"}
+NOT_SUBMITTED = {"DRY_RUN_PASSED_LOCAL_CHECKS", "GAVE_UP", "OUT_OF_TIME", "USAGE_LIMIT", "SKIPPED"}
+# Stop reasons that the routine prompt uses for problems only the user can fix.
+NEEDS_USER_PATTERNS = (("credential", "Prove2me API key missing or rejected; mint a new key on prove2.me "
+                        "and update PROVE2ME_CREDENTIALS"),
+                       ("api key", "Prove2me API key missing or rejected; mint a new key on prove2.me "
+                        "and update PROVE2ME_CREDENTIALS"),
+                       ("lean/mathlib setup failed", None))
+NEEDS_USER_USAGE = {"overage": "Claude account is on paid overage; turn off extra usage at "
+                               "claude.ai/settings/usage",
+                    "unknown": "Claude usage could not be read, so the run stopped"}
+
+
+def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
+                needs_user: bool = False) -> str | None:
+    """The one-line notification for this run, or None. Never for lead-window no-go runs."""
+    level = cfg.get("notify", "important")
+    if level not in NOTIFY_LEVELS:
+        print(f"warning: unknown notify setting {level!r}; using 'important'", file=sys.stderr)
+        level = "important"
+    if level == "off":
+        return None
+    results = [e for e in events if e.get("event") == "result"]
+    decisions = [e.get("decision") or {} for e in events if e.get("event") == "usage"]
+    if not results and any(d.get("kind") == "window" and not d.get("go") for d in decisions):
+        return None
+    log = f"Log: logs/{rid}.md"
+    # Something only the user can fix.
+    attention = None
+    low = (stop_reason or "").lower()
+    for pat, msg in NEEDS_USER_PATTERNS:
+        if pat in low:
+            attention = msg or stop_reason
+            break
+    if attention is None and decisions and not decisions[-1].get("go"):
+        attention = NEEDS_USER_USAGE.get(decisions[-1].get("kind"))
+    if attention is None and needs_user:
+        attention = stop_reason or "the run stopped on an error"
+    # What was submitted (or, in dry run, would have been).
+    accepted = [e["theorem_name"] for e in results if e.get("status") in ACCEPTED]
+    pending = [e for e in results if e.get("status") == "PENDING"]
+    rejected = [e for e in results if e.get("submission_id") and e.get("status") not in ACCEPTED | {"PENDING"}]
+    dry = [e["theorem_name"] for e in results if e.get("status") == "DRY_RUN_PASSED_LOCAL_CHECKS"]
+    parts = []
+    if accepted:
+        parts.append(f"{len(accepted)} accepted ({', '.join(accepted)})")
+    if rejected:
+        verdicts = ", ".join(sorted({e.get("status", "?") for e in rejected}))
+        parts.append(f"{len(rejected)} rejected ({verdicts})")
+    if pending:
+        parts.append(f"{len(pending)} still pending")
+    if dry:
+        parts.append(f"{len(dry)} passed local checks in dry run ({', '.join(dry)})")
+    if attention:
+        extra = f" (also: {'; '.join(parts)})" if parts else ""
+        return f"prove2me-autoprover needs you: {attention}{extra}. {log}"
+    if parts:
+        return f"prove2me-autoprover: {', '.join(parts)}. {log}"
+    if results and level == "every_run":
+        counts: dict[str, int] = {}
+        for e in results:
+            counts[e.get("status", "?")] = counts.get(e.get("status", "?"), 0) + 1
+        tally = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+        return f"prove2me-autoprover: nothing submitted; {len(results)} claim(s) attempted ({tally}). {log}"
+    return None
+
+
+def _webhook_url(cfg: dict) -> str:
+    return (os.environ.get("AUTOPROVER_WEBHOOK_URL") or cfg.get("notify_webhook_url") or "").strip()
+
+
+def webhook_request(url: str, message: str) -> tuple[bytes, dict]:
+    """Body and headers for a webhook POST: Slack and Discord get JSON, anything else plain text."""
+    host = (urllib.parse.urlsplit(url).hostname or "").lower()
+    if host == "hooks.slack.com" or host.endswith(".hooks.slack.com"):
+        return json.dumps({"text": message}).encode(), {"Content-Type": "application/json"}
+    if host in ("discord.com", "discordapp.com") or host.endswith((".discord.com", ".discordapp.com")):
+        return json.dumps({"content": message}).encode(), {"Content-Type": "application/json"}
+    return message.encode(), {"Content-Type": "text/plain; charset=utf-8", "Title": "prove2me-autoprover"}
+
+
+def cmd_notify(api: Api | None, cfg: dict, args) -> None:
+    """POST the run's notification to the configured webhook. Never fails the run, never prints the URL."""
+    message = args.message
+    if message is None:
+        f = STATE / "notify.txt"
+        message = f.read_text().strip() if f.exists() else ""
+    url = _webhook_url(cfg)
+    if not url:
+        print("notify: no webhook configured (AUTOPROVER_WEBHOOK_URL / notify_webhook_url); nothing sent")
+        return
+    if not message or message == "NONE":
+        print("notify: nothing to send")
+        return
+    if urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+        print("warning: notify: webhook URL is not http(s); nothing sent", file=sys.stderr)
+        return
+    body, headers = webhook_request(url, message)
+    req = urllib.request.Request(url, data=body, headers={**headers, "User-Agent": "prove2me-autoprover"},
+                                 method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            print(f"notify: webhook answered HTTP {r.status}")
+    except urllib.error.HTTPError as e:
+        print(f"warning: notify: webhook answered HTTP {e.code}; notification not delivered", file=sys.stderr)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        reason = getattr(e, "reason", e)
+        print(f"warning: notify: webhook request failed ({type(e).__name__}: "
+              f"{str(reason).replace(url, '<webhook>')[:200]}); notification not delivered", file=sys.stderr)
 
 
 def main() -> None:
@@ -917,6 +1038,10 @@ def main() -> None:
     s.add_argument("--from-file", help=argparse.SUPPRESS)  # parse saved stream-json output (tests)
     s = sub.add_parser("summary", help="write logs/<run>.md, .jsonl and dry-run solutions to the data repo")
     s.add_argument("--stop-reason", default="")
+    s.add_argument("--needs-user", action="store_true",
+                   help="the stop needs the user's action (e.g. the tool is broken); forces a notification")
+    s = sub.add_parser("notify", help="POST the run's notification (or --message) to the configured webhook")
+    s.add_argument("--message", help="text to send (default: the NOTIFY text from the last `summary`)")
     args = p.parse_args()
 
     cfg = load_config()

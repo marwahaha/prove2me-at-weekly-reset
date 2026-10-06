@@ -12,6 +12,8 @@
   "allow_disproofs": true,
   "allow_sketches": true,
 
+  "notify": "important",
+
   "selection": {
     "sources": ["saved", "missions", "search"],
     "mission_ids": [],
