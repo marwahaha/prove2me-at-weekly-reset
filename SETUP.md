@@ -121,7 +121,15 @@ Settings:
   - While this repo is private, attaching it is the only way a run can get the tool. Once it is public, the plan is to attach only the data repo and have each run download the tool at a pinned version with [`scripts/bootstrap.sh`](scripts/bootstrap.sh) (variable `AUTOPROVER_REF`).
 - **Environment:** the one from step 4.
 - **Prompt:** the whole of [`prompts/routine-trigger.md`](prompts/routine-trigger.md). It locates both clones and hands over to the full instructions in [`prompts/routine.md`](prompts/routine.md), which runs read fresh from GitHub each time.
-- **Model:** ask the user. Opus is the strongest prover; Sonnet uses less allowance.
+- **Model:** default `opus`. Offer the user the options:
+
+  | Model setting | What it means |
+  |---|---|
+  | `opus` (default) | The newest Opus, the strongest prover. It is an alias, so the routine moves to a newer Opus by itself when one comes out. |
+  | `sonnet` | The newest Sonnet. Uses less allowance per run, proves less. Also moves to newer versions by itself. |
+  | A full model ID, e.g. `claude-opus-5-5` | Pinned to that exact version; it never changes until you edit the routine. |
+
+  In the routine dialog, pick the model by name, e.g. **Opus**. Claude, through the routine API: set the model to the alias `opus`, not a full ID, unless the user asks to pin one.
 - **Tools:** Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, PushNotification.
 - **Connectors:** none.
 - **Schedule:** once a week, at the weekly reset minus `lead_hours` (2 hours) plus 7 minutes, as a cron line in UTC (for example `7 6 * * 2`). The cron is in UTC, so daylight saving does not shift it.

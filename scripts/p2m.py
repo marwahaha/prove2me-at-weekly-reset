@@ -352,32 +352,61 @@ def _key_passwords() -> list[bytes]:
     return list(dict.fromkeys(out))
 
 
+_FERNET_PROBE = "from cryptography.fernet import Fernet; Fernet(Fernet.generate_key())"
+_fernet_error = ""
+
+
+def _fernet_works() -> bool:
+    """Whether a fresh Python can really use Fernet. Checked in a subprocess, because a broken
+    install (e.g. a distro `cryptography` without `_cffi_backend`) can panic in Rust instead of
+    raising ImportError, and a half-loaded extension cannot be reloaded in this process."""
+    global _fernet_error
+    r = subprocess.run([sys.executable, "-c", _FERNET_PROBE], capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        lines = [l for l in r.stderr.strip().splitlines() if "Error" in l or "panicked" in l]
+        _fernet_error = (lines[-1] if lines else r.stderr.strip()[-200:])[:200]
+    return r.returncode == 0
+
+
 def _fernet_module():
-    """cryptography.fernet, installing the package for this user if it is missing; or None."""
+    """cryptography.fernet, installing a working copy for this user if it is missing or broken;
+    or None (then _fernet_error says why)."""
+    global _fernet_error
+    if "cryptography.fernet" in sys.modules:
+        return sys.modules["cryptography.fernet"]
+    if not _fernet_works():
+        if os.environ.get("AUTOPROVER_NO_PIP"):
+            return None
+        import importlib
+        import site
+        in_venv = sys.prefix != sys.base_prefix  # a venv refuses --user installs
+        # --ignore-installed: a broken system copy would otherwise count as "already satisfied".
+        base = ["--ignore-installed", "cryptography", "cffi"]
+        attempts = [base] if in_venv else [["--user", *base], ["--user", "--break-system-packages", *base]]
+        for extra in attempts:
+            r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", *extra],
+                               capture_output=True, text=True, timeout=300)
+            if r.returncode == 0:
+                break
+        else:
+            _fernet_error = "pip install failed: " + (r.stderr.strip().splitlines() or ["?"])[-1][:200]
+            return None
+        if not _fernet_works():
+            return None
+        # The user site must come before the system site-packages, or the broken copy wins.
+        user_site = site.getusersitepackages()
+        if not in_venv and user_site in sys.path:
+            sys.path.remove(user_site)
+        if not in_venv:
+            sys.path.insert(0, user_site)
+        importlib.invalidate_caches()
     try:
         from cryptography import fernet
         return fernet
-    except ImportError:
-        pass
-    if os.environ.get("AUTOPROVER_NO_PIP"):
-        return None
-    import importlib
-    import site
-    in_venv = sys.prefix != sys.base_prefix  # a venv refuses --user installs
-    attempts = [[]] if in_venv else [["--user"], ["--user", "--break-system-packages"]]
-    for extra in attempts:
-        r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", *extra, "cryptography"],
-                           capture_output=True, text=True, timeout=300)
-        if r.returncode == 0:
-            break
-    user_site = site.getusersitepackages()
-    if user_site not in sys.path:
-        sys.path.append(user_site)
-    importlib.invalidate_caches()
-    try:
-        from cryptography import fernet
-        return fernet
-    except ImportError:
+    except BaseException as e:  # noqa: BLE001 (a pyo3 panic is not an Exception)
+        if isinstance(e, (KeyboardInterrupt, SystemExit)):
+            raise
+        _fernet_error = f"{type(e).__name__}: {e}"[:200]
         return None
 
 
@@ -391,7 +420,7 @@ def seal(plain: bytes, password: bytes) -> dict:
     import base64
     fernet = _fernet_module()
     if fernet is None:
-        raise RuntimeError("the Python package 'cryptography' is missing and could not be installed")
+        raise RuntimeError(f"the Python package 'cryptography' is unusable ({_fernet_error})")
     salt = os.urandom(16)
     token = _fernet(fernet, password, salt, KEY_KDF_ITERATIONS).encrypt(plain)
     return {"format": KEY_FORMAT, "kdf": "pbkdf2-sha256", "iterations": KEY_KDF_ITERATIONS,
@@ -470,7 +499,7 @@ def cmd_renew_key(api: Api, cfg: dict, args) -> None:
     if not passwords:
         fail("no encryption password: set PROVE2ME_CREDENTIALS (or AUTOPROVER_ENCRYPTION_SECRET)")
     if _fernet_module() is None:
-        fail("the Python package 'cryptography' is missing and could not be installed (pip)")
+        fail(f"the Python package 'cryptography' is unusable and could not be installed ({_fernet_error})")
     # Mint on every run: minting is cheap and does not revoke older keys, so each run
     # leaves a key valid for 30 days, and only about 4 missed runs in a row let it expire.
     api.token()  # a valid key is needed to mint the next one (exits 3 if none works)
@@ -1817,6 +1846,13 @@ def main() -> None:
         fn(api, cfg, args)
     except RuntimeError as e:
         die(str(e))
+    except Exception as e:  # renew-key must never break a run: log it and go on
+        if args.cmd != "renew-key":
+            raise
+        reason = f"unexpected error: {type(e).__name__}: {str(e)[:200]}"
+        ledger_append({"event": "key_renewal_failed", "reason": reason})
+        print(json.dumps({"renewed": False, "error": reason}))
+        sys.exit(8 if args.strict else 0)
 
 
 if __name__ == "__main__":

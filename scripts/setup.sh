@@ -25,10 +25,15 @@ log() { echo "[setup +$((SECONDS - START))s] $*"; }
 
 # 0. Python's `cryptography` package, for the encrypted renewed Prove2me key. p2m.py also
 #    installs it on first use if missing; doing it here caches it with the environment.
-python3 -c 'import cryptography' 2>/dev/null \
-  || timeout 120 python3 -m pip install -q --user cryptography 2>/dev/null \
-  || timeout 120 python3 -m pip install -q --user --break-system-packages cryptography 2>/dev/null \
-  || log "could not install the Python package cryptography (p2m.py retries on first use)"
+#    The check really loads Fernet: a distro copy can import but crash without _cffi_backend.
+#    --ignore-installed puts a working copy in the user site even next to a broken one.
+FERNET_OK='from cryptography.fernet import Fernet; Fernet(Fernet.generate_key())'
+python3 -c "$FERNET_OK" >/dev/null 2>&1 \
+  || timeout 120 python3 -m pip install -q --user --ignore-installed cryptography cffi >/dev/null 2>&1 \
+  || timeout 120 python3 -m pip install -q --user --break-system-packages --ignore-installed cryptography cffi >/dev/null 2>&1 \
+  || true
+python3 -c "$FERNET_OK" >/dev/null 2>&1 \
+  || log "could not install a working Python cryptography package (p2m.py retries on first use)"
 
 # 1. elan + toolchain (Lean itself; ~200 MB)
 if ! command -v elan >/dev/null 2>&1 && [ ! -x "$HOME/.elan/bin/elan" ]; then
