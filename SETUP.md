@@ -21,7 +21,7 @@ Read this whole file before starting. Then:
 - Do the **[Claude]** steps yourself. For a **[You]** step, give the user the exact clicks and the ready-to-paste values from this file, then wait until they say it is done and run the step's Check.
 - Run each step's Check first. If it passes, say so and move on.
 - Ask before anything outward-facing that this file does not already cover: creating the repo, creating or changing the routine, starting a run, and switching to live mode each need the user's yes.
-- Ask the user's choices one at a time, with a recommended default.
+- Ask the user's choices one at a time, with a recommended default. Where the client can show clickable choices (an interactive form or a menu), use them instead of plain text.
 - If a Check fails twice, stop and tell the user what you saw. Do not improvise around it.
 
 ## Step 0. What you need [You]
@@ -65,7 +65,7 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 
    `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-autoprover` if needed.
 3. Ask the user's choices for `autoprover.config.json`, one at a time, and write them:
-   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Offer the user the fields that fit their interests, let them pick any number, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: then runs take open theorems from the whole library, most votes first.
+   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: then runs take open theorems from the whole library, most votes first.
    - What runs attempt, in this order (`selection.sources`, default `["saved", "missions", "fields", "search"]`): first the theorems the user saved on prove2.me; then the open leaves of the missions listed in `mission_ids`; then the open leaves of unfinished missions in the chosen `fields` (at most `missions_per_run`, default 30, a different sample each week; highest closability first); and only when no fields are chosen, all open theorems, most votes first, then shortest statement (`query` and `tags` narrow this search). Choosing specific theorems always wins over the fields.
      - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
    - **`dry_run`:** keep it `true` for now. Step 7 switches to live.
