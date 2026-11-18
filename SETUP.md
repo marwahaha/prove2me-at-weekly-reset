@@ -64,14 +64,15 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
    ```
 
    `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-at-weekly-reset` if needed.
-3. Ask the user's choices for `autoprover.config.json`, one at a time, and write them:
-   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: then runs take open theorems from the whole library, most votes first.
-   - What runs attempt, in this order (`selection.sources`, default `["saved", "missions", "fields", "search"]`): first the theorems the user saved on prove2.me; then the open leaves of the missions listed in `mission_ids`; then the open leaves of unfinished missions in the chosen `fields` (at most `missions_per_run`, default 30, a different sample each week; highest closability first); and only when no fields are chosen, all open theorems, most votes first, then shortest statement (`query` and `tags` narrow this search). Choosing specific theorems always wins over the fields.
-     - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
-   - **`dry_run`:** keep it `true` for now. Step 7 switches to live.
+3. Ask the user **only these three choices** for `autoprover.config.json`, one at a time, and write them:
+   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: runs then take open theorems from the whole library, most votes first.
    - **`notify`:** when to send a notification: `important` (default), `every_run` or `off`. See *Notifications* in the README.
    - **`discussion`:** `"off"` (default) or `"deadends"` to let runs post short dead-end notes in mission discussions, at most `max_comments_per_run` (default 2) per run. See *Discussions* in the README.
-   - Leave the usage-gate keys at their defaults unless the user has a reason: `lead_hours` (default `2`: runs work only in the last 2 hours before the weekly reset), `max_five_hour_utilization`, `max_weekly_utilization`, the two `claim_start_margin_*` keys, `reset_buffer_minutes` and `stop_on_overage`. See *Usage gate* in the README.
+
+   **Do not ask about anything else**; the template's defaults are right for a new user, and asking about them only adds questions. In particular:
+   - `dry_run` stays `true` (step 7 switches to live) and `test_run` stays `false` (step 6 sets it briefly).
+   - The rest of `selection` stays as is. Mention in one sentence that theorems the user saves on prove2.me are always tried first, before the fields. (For reference: `sources` runs saved theorems, then `mission_ids`, then the fields' unfinished missions, at most `missions_per_run` per run, highest closability first, and only without fields a whole-library search by votes; the filters are `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.)
+   - The usage-gate keys stay at their defaults (`lead_hours` 2, the caps and margins; see *Usage gate* in the README), unless the user brings them up.
 4. Commit and push to the default branch.
 
 **Check:** `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON.
