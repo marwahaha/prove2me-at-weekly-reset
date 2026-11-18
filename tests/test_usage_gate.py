@@ -89,6 +89,20 @@ class DecisionTests(Base):
         rc, out = self.usage(reset_min=30 * 60, five=0.6, env={"AUTOPROVER_IGNORE_WINDOW": "1"})
         self.assertEqual((rc, out["decision"]["kind"]), (6, "limit"))  # caps still apply
 
+    def test_test_run_config(self):
+        self.config.write_text(json.dumps({"minutes_per_claim": 40, "test_run": True,
+                                           "dry_run": False, "max_claims_per_run": 3}))
+        rc, out = self.usage(reset_min=30 * 60)
+        self.assertEqual((rc, out["claim_budget_minutes"]), (0, 40))  # window ignored
+        rc, out = self.usage(reset_min=30 * 60, week=0.85)
+        self.assertEqual((rc, out["decision"]["kind"]), (6, "limit"))  # caps still apply
+        code = ("import importlib.util,json,sys;s=importlib.util.spec_from_file_location('p',sys.argv[1]);"
+                "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);c=m.load_config();"
+                "print(json.dumps([c['dry_run'],c['max_claims_per_run']]))")
+        p = subprocess.run([sys.executable, "-c", code, str(P2M)], capture_output=True, text=True,
+                           env={**self.env, "AUTOPROVER_DRY_RUN": "false", "AUTOPROVER_MAX_CLAIMS_PER_RUN": "5"})
+        self.assertEqual(json.loads(p.stdout), [True, 1])  # no env var can make a test run live
+
     def test_overage_and_unknown(self):
         self.assertEqual(self.usage(overage=True)[1]["decision"]["kind"], "overage")
         rc, out = self.usage(omit=("five_hour",))

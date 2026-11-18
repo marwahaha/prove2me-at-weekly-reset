@@ -24,7 +24,9 @@ if [ -n "${PROVE2ME_CREDENTIALS:-}" ]; then
 fi
 # PROVE2ME_CREDENTIALS_FILE (used by p2m.py) may point elsewhere, e.g. in local tests.
 CREDS_FILE="${PROVE2ME_CREDENTIALS_FILE:-$WS/credentials.json}"
-if [ ! -s "$CREDS_FILE" ]; then
+# With a separate AUTOPROVER_ENCRYPTION_SECRET, the pasted key may be gone once a renewed key
+# exists in the data repo; pin-env below then checks that the renewed key works.
+if [ ! -s "$CREDS_FILE" ] && [ -z "${AUTOPROVER_ENCRYPTION_SECRET:-}" ]; then
   log "no Prove2me credentials: set the PROVE2ME_CREDENTIALS secret / environment variable"
   exit 3
 fi

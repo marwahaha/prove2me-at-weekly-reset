@@ -9,8 +9,6 @@
 #   The routine snapshots the result only if setup finishes in about five
 #   minutes, so every step is time-boxed; whatever does not fit is finished by
 #   scripts/prepare.sh at the start of each run. Never fails the session.
-# * GitHub Actions: run as a step; actions/cache keeps ~/.elan, ~/.cache/mathlib
-#   and the workspace's .lake between runs.
 #
 # No secrets are used here.
 set -u
@@ -24,6 +22,13 @@ BUDGET="${P2M_SETUP_BUDGET_SECONDS:-270}"   # stay under the ~5 min snapshot lim
 START=$SECONDS
 left() { echo $(( BUDGET - (SECONDS - START) )); }
 log() { echo "[setup +$((SECONDS - START))s] $*"; }
+
+# 0. Python's `cryptography` package, for the encrypted renewed Prove2me key. p2m.py also
+#    installs it on first use if missing; doing it here caches it with the environment.
+python3 -c 'import cryptography' 2>/dev/null \
+  || timeout 120 python3 -m pip install -q --user cryptography 2>/dev/null \
+  || timeout 120 python3 -m pip install -q --user --break-system-packages cryptography 2>/dev/null \
+  || log "could not install the Python package cryptography (p2m.py retries on first use)"
 
 # 1. elan + toolchain (Lean itself; ~200 MB)
 if ! command -v elan >/dev/null 2>&1 && [ ! -x "$HOME/.elan/bin/elan" ]; then

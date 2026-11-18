@@ -5,7 +5,7 @@ Two repositories are cloned for this run: the user's private data repository (it
 1. Locate both clones and export their paths. Start from the current directory and its parent; if that fails, search the filesystem:
 
    ```bash
-   for d in "$PWD" "$PWD"/.. "$PWD"/../* "$HOME"/* /workspace/* /repos/*; do
+   for d in "$PWD" "$PWD"/* "$PWD"/.. "$PWD"/../* "$HOME"/* /home/*/* /workspace/* /repos/*; do
      [ -f "$d/autoprover.config.json" ] && [ -z "${AUTOPROVER_DATA:-}" ] && export AUTOPROVER_DATA="$(cd "$d" && pwd)"
      [ -f "$d/scripts/p2m.py" ] && [ -f "$d/prompts/routine.md" ] && [ -z "${AUTOPROVER_TOOL:-}" ] && export AUTOPROVER_TOOL="$(cd "$d" && pwd)"
    done

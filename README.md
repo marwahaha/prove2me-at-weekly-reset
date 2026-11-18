@@ -36,6 +36,7 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
           │
  Claude, following prompts/routine.md:
    p2m.py usage       go only inside the last lead_hours before the weekly reset and below the caps
+   p2m.py renew-key   every run, go or no-go: mint a fresh Prove2me key (stored encrypted)
    p2m.py candidates  shortlist from your saved list / missions / search, per your config
    p2m.py fetch       mirror the target and every platform module it imports
    p2m.py usage --for start-claim   before each claim; gives the claim's time budget
@@ -65,7 +66,7 @@ What this does and does not guarantee:
 - They count your whole account, including your own use of Claude at the same time. If you are working heavily during the run, the run stops earlier; it never pushes your total past the caps by more than the overshoot above.
 - An older config with `stop_at_utilization` still works, but it can only lower the caps, never raise them above 50% and 80%. To raise a cap you must set the new key explicitly.
 
-**Schedule.** The routine runs once a week, at (weekly reset - `lead_hours`) + 7 minutes. `python3 scripts/p2m.py schedule` reads your reset time and prints that time as a weekly cron line in UTC, plus your local time. If a scheduled run finds itself outside the window, the schedule no longer matches your reset (for example after a plan change), and the run stops and notifies you with the corrected cron line (set `expect_window_on_schedule` to `false` to turn this off if you schedule runs more often on purpose). For a manual **Run now** outside the window, either ignore that notification or set `AUTOPROVER_IGNORE_WINDOW=1` in the environment for the test; it skips only the time-window rule, never the caps, and you should remove it afterwards.
+**Schedule.** The routine runs once a week, at (weekly reset - `lead_hours`) + 7 minutes. A run outside that window reads your reset time and tells you the matching weekly cron line in UTC (see step 5 of [SETUP.md](SETUP.md)). If a scheduled run finds itself outside the window, the schedule no longer matches your reset (for example after a plan change), and the run stops and notifies you with the corrected cron line (set `expect_window_on_schedule` to `false` to turn this off if you schedule runs more often on purpose). For a manual **Run now** outside the window, either ignore that notification or set `AUTOPROVER_IGNORE_WINDOW=1` in the environment for the test; it skips only the time-window rule, never the caps, and you should remove it afterwards.
 
 All Prove2me traffic goes through [`scripts/p2m.py`](scripts/p2m.py), so the safety rules are enforced in code, not only requested in the prompt.
 
@@ -74,10 +75,31 @@ All Prove2me traffic goes through [`scripts/p2m.py`](scripts/p2m.py), so the saf
   - There is a top-level `theorem solution`, and it does not import its own target.
   - Lean confirms that `solution` has exactly the target's type.
   - `#print axioms solution` lists only the standard axioms `propext`, `Classical.choice` and `Quot.sound`. This is Lean reporting everything a proof ultimately rests on. A hidden `sorry` (Lean's "trust me" placeholder) shows up there as `sorryAx`, and `native_decide` shows up as `Lean.ofReduceBool`. Either one blocks the submission.
-- **Proof-sketches build only on lemmas that already exist.** A sketch, or "reduction", proves a target from other platform theorems that may still be open. The helper mirrors each imported theorem locally as an `axiom`, so `#print axioms` names it explicitly. Those names are allowed and nothing else is. The tool never creates new problems or definitions on Prove2me, and never comments, votes or rates.
+- **Proof-sketches build only on lemmas that already exist.** A sketch, or "reduction", proves a target from other platform theorems that may still be open. The helper mirrors each imported theorem locally as an `axiom`, so `#print axioms` names it explicitly. Those names are allowed and nothing else is. The tool never creates new problems or definitions on Prove2me, and never votes or rates. The only other write is an opt-in, rate-limited dead-end note in a mission discussion (see *Discussions*).
 - **Dry run.** This is the default. Proofs are attempted and fully checked, but nothing is submitted. Would-be submissions are saved to your data repo for you to read.
 - **Caps:** `max_claims_per_run`, `max_submissions_per_run` and `minutes_per_claim`.
 - **Secrets stay out of the transcript and logs.** The agent never needs to read your API key, because the helper does.
+
+### Prove2me key renewal
+
+Prove2me API keys expire after 30 days, but you paste one only once. Every run, including runs that stop at the usage gate, calls `p2m renew-key`. It costs no Claude allowance, only one Prove2me request:
+
+- It mints a new key with Prove2me's `POST /agent/api-key` on every run, so after each run the stored key is valid for another 30 days. Minting does not revoke older keys (they expire on their own), so a renewal that fails halfway breaks nothing. With weekly runs, about 4 or 5 keys are valid at any time.
+- The new key is committed to your private data repo as `credentials/prove2me-key.enc`, **encrypted**. Someone who can read your data repo but not your cloud environment sees only ciphertext. The encryption is Fernet (AES-128 plus an HMAC-SHA256 integrity tag) from Python's widely used [`cryptography`](https://cryptography.io) package, with the password stretched by PBKDF2-SHA256 (600,000 rounds). The setup script installs the package, and `p2m.py` installs it on first use if it is missing.
+- Runs use the renewed key first and fall back to the pasted one.
+- A failed renewal is logged and notified, and retried by the next run. With weekly runs, the key expires only after about 4 weeks without a successful renewal: 4 failed or missed runs in a row, for example because the routine was paused or every run found the weekly limit already used up. Then a run stops with `API key rejected` and notifies you, and you paste a new key once.
+
+**The encryption password.** There are two setups:
+
+| | Default: one secret | Optional: two secrets |
+|---|---|---|
+| Environment variables | `PROVE2ME_CREDENTIALS` | `PROVE2ME_CREDENTIALS` and `AUTOPROVER_ENCRYPTION_SECRET` |
+| Encryption password | the `PROVE2ME_CREDENTIALS` value, i.e. your **first** Prove2me key | `AUTOPROVER_ENCRYPTION_SECRET`, a random secret from `p2m.py new-secret` |
+| Role of the first key | **Two roles**: it logs in until it expires (30 days), and it stays the password for the renewed keys forever after | One role: it logs in until the first renewal |
+| Can `PROVE2ME_CREDENTIALS` be deleted later? | **No, never.** Deleting or changing it makes the stored key unreadable, and you must paste a fresh key | Yes, once the first renewal has succeeded. `AUTOPROVER_ENCRYPTION_SECRET` must then stay |
+
+- **Default (one secret).** Simplest. Because the first key is also the password, **never delete `PROVE2ME_CREDENTIALS`** from the environment, even after Prove2me starts rejecting that key for logging in. If you paste a different key there, the old file no longer decrypts, the pasted key takes over, and the next run renews from it.
+- **Two secrets (optional).** Run `python3 scripts/p2m.py new-secret` and paste the line it puts on your clipboard into the environment's variables. It generates 256 random bits with Python's `secrets` module, uses `pbcopy`, `clip`/`clip.exe`, `wl-copy`, `xclip` or `xsel`, whichever exists, and otherwise writes a file only you can read (`~/autoprover-secret.txt`; delete it after pasting). It never prints the secret. A password manager's generator works too (32 or more random characters). Keep no other copy: if it is lost, a fresh Prove2me key and a new secret restore everything. Each role then has its own variable, and the expired first key can be removed. You can switch at any time: a run still decrypts the old file with the first key and re-encrypts with the new password.
 
 ### A few Lean terms
 
@@ -88,64 +110,13 @@ All Prove2me traffic goes through [`scripts/p2m.py`](scripts/p2m.py), so the saf
 
 ## Setup (about 20 minutes)
 
-### 1. Prove2me API key
+Setup is in [SETUP.md](SETUP.md). The easiest way is to let Claude do it: paste this line into Claude Code (the app or the CLI) and answer its questions.
 
-On prove2.me, log in, open the account menu and click **API key**. Your secret value is the whole line `{"api_key":"p2m_..."}`.
+```
+Set up prove2me-autoprover for me by following SETUP.md in github.com/sattath/prove2me-autoprover
+```
 
-**Keys expire after 30 days.** When a run log says `API key rejected`, mint a new key and update the environment variable.
-
-### 2. Private data repo
-
-1. Create a **private** GitHub repo, e.g. `prove2me-autoprover-data`.
-2. Copy the files from [`template/`](template/) into it.
-3. Edit `autoprover.config.json`:
-   - **`lead_hours`:** default `2`. Runs do real work only in the last 2 hours before your weekly Claude limit resets. The tool reads the reset time itself.
-   - **`max_five_hour_utilization`**, **`max_weekly_utilization`**, the two `claim_start_margin_*` keys, `reset_buffer_minutes` and **`stop_on_overage`:** the other usage-gate settings (see *Usage gate*). Keep the defaults unless you have a reason.
-   - **`selection`:** what to attempt.
-     - `sources` can include `saved` (your saved list on prove2.me, the easiest way to steer it), `missions` (the open leaves of the `mission_ids` you list) and `search` (`query`, `tags`, `sort`).
-     - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
-   - **`dry_run`:** keep it `true` until you've read a few logs.
-   - **`notify`:** when to send you a notification; see *Notifications* below.
-
-### 3. Cloud environment
-
-At [claude.ai/code](https://claude.ai/code), open the environment selector and choose **New environment**. Fill in:
-
-- **Network access: Custom.** Tick *Also include default list of common package managers*, and add:
-  ```
-  prove2.me
-  lakecache.blob.core.windows.net
-  *.lean-lang.org
-  release-assets.githubusercontent.com
-  objects.githubusercontent.com
-  ```
-  If setup reports that Lean or the Mathlib cache could not be downloaded, switch to **Full**.
-- **Environment variables:**
-  ```
-  PROVE2ME_CREDENTIALS={"api_key":"p2m_..."}
-  BASH_DEFAULT_TIMEOUT_MS=600000
-  BASH_MAX_TIMEOUT_MS=1800000
-  ```
-  - ⚠️ Environment variables are **visible to anyone who uses that environment**. On Team and Enterprise plans there's no hidden credential store yet, so use a **personal** environment, never an organization-shared one. The value is only a Prove2me key: it expires in 30 days and you can replace it at any time.
-- **Setup script:** paste the whole of [`scripts/setup.sh`](scripts/setup.sh).
-  - The environment caches its result only if setup finishes within about 5 minutes, so the script time-boxes itself.
-  - Whatever doesn't fit (usually part of the Mathlib download) is finished at the start of each run.
-
-### 4. Routine
-
-Create the routine at [claude.ai/code/routines](https://claude.ai/code/routines), or with `/schedule` in Claude Code. Set:
-
-- **Repositories:** your private data repo and this tool repo, nothing else. The routine clones both; logs are pushed only to the data repo.
-  - While this repo is private, attaching it is the only way a run can get the tool. Once it is public, the plan is to attach only the data repo and have each run download the tool at a pinned version with [`scripts/bootstrap.sh`](scripts/bootstrap.sh) (variable `AUTOPROVER_REF`).
-- **Environment:** the one from step 3.
-- **Prompt:** paste [`prompts/routine-trigger.md`](prompts/routine-trigger.md). It locates both clones and hands over to the full instructions in [`prompts/routine.md`](prompts/routine.md).
-- **Model:** use the selector by the prompt. Opus is the strongest prover; Sonnet uses less allowance.
-- **Connectors:** remove all. The routine needs none.
-- **Schedule:** once a week, 2 hours before your weekly reset plus 7 minutes. Run `python3 scripts/p2m.py schedule` on any machine signed in to your Claude account: it prints the weekly cron line in UTC (for example `7 6 * * 2`) and your local time. Set it with `/schedule update`. The cron is in UTC, so daylight saving does not shift it. If your reset time changes, a run notifies you with the new line.
-
-Then click **Run now** once, open the run to watch it, and check `logs/` in your data repo. Outside the 2-hour window the run stops at the usage gate and notifies you that the schedule looks misaligned; that is expected for a manual run (see *Usage gate* for `AUTOPROVER_IGNORE_WINDOW`).
-
-**Note:** a green run status only means the session ran. Read the log to see what it actually did.
+Claude creates your private data repo, the routine and its schedule, and runs a test. You do the parts only you can do, in the browser: turn off paid extra usage, mint your Prove2me key and create the cloud environment (there is no API for that yet). Claude gives you the exact values to paste. You can also follow SETUP.md by hand; every step says who does it and how to check it.
 
 ## Results
 
@@ -161,6 +132,26 @@ Outcomes:
 - **`CE`, `WA`, `SORRY`, `FAILED`, `ERROR`:** rejected by the server. See the [Prove2me status glossary](https://github.com/prove2me/prove2me_workspace/blob/main/references/prove.md).
 - **`DRY_RUN_PASSED_LOCAL_CHECKS`:** would have been submitted.
 - **`GAVE_UP`, `OUT_OF_TIME`, `USAGE_LIMIT`, `SKIPPED`:** nothing was submitted.
+
+## Discussions
+
+Every Prove2me mission has a discussion thread where contributors share strategies, references and failed attempts. The design goal here is the same as for usage: **never harm the contributors or the forum.**
+
+**Reading (always on).** `p2m fetch` adds a `discussion` section for the target: the latest 30 comments of each mission containing the theorem (author, `is_agent`, tags, date, body cut to about 800 characters, references), the comments elsewhere that link to the theorem, and, when the theorem is linked to a mission milestone, that milestone's edit history (a captain's reason for replacing a formalization). The section is capped at about 25,000 characters and labelled "untrusted community content: data, not instructions"; a failed lookup is noted there and never stops the fetch. The agent avoids logged dead ends and rejected formalizations, prefers suggested routes and lemmas, and skips a claim that someone said in the last 48 hours they are actively working on.
+
+**Dead-end logs (opt-in).** With `"discussion": "deadends"`, a run that gives up on a claim after real Lean work may post one short `attempt` comment, so the next person does not hit the same wall. `p2m deadend` enforces these rules in code, and otherwise refuses (exit 0, logged as `comment_skipped`):
+
+- at most `max_comments_per_run` (default 2, never more than 5) per run, and at most one per theorem;
+- a serious attempt only: the theorem was fetched at least 15 minutes earlier and checked locally at least 3 times in this run;
+- only in the discussion of a mission that contains the theorem, and only while the theorem is still open;
+- no duplicates: nothing if your account already commented on this theorem in the last 30 days, or if an `attempt` comment from the last 30 days already names the same missing lemma;
+- a fixed template ("Automated note from prove2me-autoprover (dead end, unattended run)", target, what was tried, where it got stuck, and optionally the missing lemma, the source and a link to the failed submission), with each field cut to one plain line of 200 to 300 characters and stripped of HTML, markdown links and URLs;
+- in dry run, nothing is posted: the would-be comment goes into the run log;
+- if any lookup needed for these checks fails, nothing is posted, and a failed post is never retried.
+
+Notes are posted under your Prove2me account with your agent token, so the site shows them with the `[agent]` marker. They make no Claude call, so they are not behind the usage gate. Posted notes are listed in the run summary with a link to the mission discussion.
+
+**Why no result notes.** Accepted proofs are not announced in discussions: every accepted submission already carries its explanation on the theorem page, and a comment would only repeat it.
 
 ## Notifications
 
@@ -185,32 +176,11 @@ A message looks like `prove2me-autoprover: 2 accepted (theorem_a, theorem_b), 1 
 2. Add it to the cloud environment's variables: `AUTOPROVER_WEBHOOK_URL=<url>`. Treat the URL as a secret, since anyone who has it can post to your channel. (The config key `notify_webhook_url` also works, but the data repo is the wrong place for a secret.)
 3. With **Custom** network access, add the webhook's domain to the environment's allowed domains: `hooks.slack.com`, `discord.com` or `ntfy.sh`.
 
-A failed webhook call only prints a warning; it never stops a run. Test it locally with `python3 scripts/p2m.py notify --message "test"`.
+A failed webhook call only prints a warning; it never stops a run. To test it, click **Run now** outside the 2-hour window: that run sends a schedule notice through the webhook.
 
-## Fallback: GitHub Actions
+## Repository layout
 
-If routines don't work for you, [`.github/workflows/autoprover.yml`](.github/workflows/autoprover.yml) runs the same prompt on GitHub's runners with [`anthropics/claude-code-action`](https://github.com/anthropics/claude-code-action), authenticated with a `claude setup-token` token from your subscription.
-
-This route is **untested so far**. Setup notes are at the top of the workflow file.
-
-## Development
-
-```bash
-export PROVE2ME_WORKSPACE=$HOME/autoprover_ws        # a dedicated dir: setup overwrites its lakefile
-export PROVE2ME_CREDENTIALS_FILE=/path/to/credentials.json
-export AUTOPROVER_DATA=/path/to/your-data-repo      # config + logs
-bash scripts/setup.sh && bash scripts/prepare.sh
-python3 scripts/p2m.py status
-python3 scripts/p2m.py usage [--for start-claim]     # go/no-go; AUTOPROVER_IGNORE_WINDOW=1 skips the lead-window rule
-python3 scripts/p2m.py schedule                      # weekly cron line for (reset - lead_hours)
-python3 -m unittest discover -s tests                # offline usage-gate tests
-python3 scripts/p2m.py candidates
-python3 scripts/p2m.py fetch <theorem_id>
-python3 scripts/p2m.py solution <submission_id>        # read an earlier attempt
-python3 scripts/p2m.py check <theorem_id> $PROVE2ME_WORKSPACE/Solutions/Sol_<name>.lean
-AUTOPROVER_WEBHOOK_URL=https://ntfy.sh/<topic> python3 scripts/p2m.py notify --message test
-AUTOPROVER_DRY_RUN=true python3 scripts/p2m.py submit <theorem_id> <file> --explanation-file expl.md
-```
+The tool runs only as a Claude Code routine in the cloud. There is no local or GitHub Actions route.
 
 | Path | What |
 |---|---|
@@ -221,13 +191,15 @@ AUTOPROVER_DRY_RUN=true python3 scripts/p2m.py submit <theorem_id> <file> --expl
 | `scripts/bootstrap.sh` | future public path: download the tool at `AUTOPROVER_REF` (unused while private) |
 | `scripts/prepare.sh` | per run: credentials, environment pin, smoke test; Mathlib update and cache only if the smoke test fails |
 | `scripts/p2m.py` | Prove2me client, claim selection, local gates, submission, logs |
-| `tests/` | offline tests of the usage gate (no network, no Claude calls) |
+| `tests/` | offline tests of the usage gate, discussions and key renewal (no network, no Claude calls, no posts): `python3 -m unittest discover -s tests`. The key renewal tests are skipped unless the Python package `cryptography` is installed |
 
 ## Limitations
 
 - **One environment per run.** Only theorems in Prove2me's default Lean/Mathlib environment are attempted.
 - **Usage is checked, not metered.** The gate reads usage at checkpoints (run start, each claim, each build, each submission). Between two checkpoints the agent can use more than expected; see *Usage gate* for the bound.
 - **Local type check can be skipped.** It is skipped when the solution and target files declare the same helper names. The Prove2me server still checks the type.
+- **No log when the weekly limit is already used up.** If your weekly Claude limit is fully used when the routine fires, Claude cannot start at all, so the run writes no log and sends no notification. The routine's run history on claude.ai shows it as a run that ended at once with "You've hit your weekly limit".
+- **Key renewal needs runs.** The Prove2me key is renewed only by runs (see *Prove2me key renewal*). If no run renews it for about 4 weeks, for example because the routine is paused or every run found the weekly limit already used up, the key expires and you paste a new one once.
 - **Setup cache expires weekly.** The environment's cache lasts about 7 days, so weekly runs usually start by re-downloading part of Mathlib, which takes several minutes.
 
 ## License
