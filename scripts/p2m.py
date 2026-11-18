@@ -72,6 +72,10 @@ DEFAULT_CONFIG = {
     # One-off test of the whole pipeline: forces dry run, at most one claim, and skips the
     # pre-reset window rule (never the caps). Set it, click Run now, then set it back.
     "test_run": False,
+    # Web access for the prover (WebSearch/WebFetch). Off by default: web tools are a way to
+    # send data out that bypasses the environment's network allowlist. Turning it on also
+    # needs the two tools on the routine; the run's self-check (`p2m safety`) enforces both.
+    "allow_web": False,
     "max_claims_per_run": 3,
     "max_submissions_per_run": 3,
     "minutes_per_claim": 40,
@@ -525,6 +529,11 @@ def cmd_renew_key(api: Api, cfg: dict, args) -> None:
     print(json.dumps({"renewed": True, "valid_until": valid}))
 
 
+def cmd_safety(api, cfg: dict, args) -> None:
+    """Offline: which optional tool classes this data repo allows (for the run's self-check)."""
+    print(json.dumps({"allow_web": cfg.get("allow_web") is True, "allow_connectors": False}))
+
+
 SECRET_VAR = "AUTOPROVER_ENCRYPTION_SECRET"
 
 
@@ -607,6 +616,7 @@ def cmd_status(api: Api, cfg: dict, args) -> None:
         "local_mathlib_rev": local_rev,
         "local_env_matches_default": local_rev == default["mathlib_rev"],
         "dry_run": cfg["dry_run"],
+        "allow_web": cfg.get("allow_web") is True,
         "max_claims_per_run": cfg["max_claims_per_run"],
         "max_submissions_per_run": cfg["max_submissions_per_run"],
         "discussion": cfg["discussion"],
@@ -1794,6 +1804,7 @@ def main() -> None:
     s = sub.add_parser("renew-key", help="renew the Prove2me API key before it expires (encrypted in the data repo)")
     s.add_argument("--no-push", action="store_true", help="write the encrypted file but do not commit/push")
     s.add_argument("--strict", action="store_true", help="exit 8 on failure (default: exit 0, logged)")
+    sub.add_parser("safety", help="which optional tools (web) the config allows; offline")
     s = sub.add_parser("new-secret", help=f"generate {SECRET_VAR} onto the clipboard (never printed)")
     s.add_argument("--file", help="write it to this private file instead of the clipboard")
     sub.add_parser("candidates", help="ranked shortlist of open claims (JSON)")

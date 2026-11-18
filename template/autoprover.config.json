@@ -11,6 +11,7 @@
 
   "dry_run": true,
   "test_run": false,
+  "allow_web": false,
   "max_claims_per_run": 3,
   "max_submissions_per_run": 3,
   "minutes_per_claim": 40,

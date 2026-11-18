@@ -103,6 +103,13 @@ class DecisionTests(Base):
                            env={**self.env, "AUTOPROVER_DRY_RUN": "false", "AUTOPROVER_MAX_CLAIMS_PER_RUN": "5"})
         self.assertEqual(json.loads(p.stdout), [True, 1])  # no env var can make a test run live
 
+    def test_safety_allow_web(self):
+        rc, out, _ = self.p2m("safety")
+        self.assertEqual((rc, json.loads(out)), (0, {"allow_web": False, "allow_connectors": False}))
+        for val, want in ((True, True), ("true", False), (1, False)):  # only a real JSON true
+            self.config.write_text(json.dumps({"allow_web": val}))
+            self.assertEqual(json.loads(self.p2m("safety")[1])["allow_web"], want)
+
     def test_overage_and_unknown(self):
         self.assertEqual(self.usage(overage=True)[1]["decision"]["kind"], "overage")
         rc, out = self.usage(omit=("five_hour",))

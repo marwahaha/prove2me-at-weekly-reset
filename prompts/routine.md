@@ -37,19 +37,23 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    reason. Never try to work around the usage gate.
 7. Attack surface: use only Bash, Read, Write, Edit, Glob and Grep, plus PushNotification for
    the final notification. Never use connector / MCP tools (any tool whose name starts with
-   `mcp__`), WebSearch or WebFetch, even if they are available, and never contact hosts other
-   than through `p2m`, `git` (the two cloned repos) and the setup scripts.
+   `mcp__`), even if they are available. Use WebSearch and WebFetch only if `p2m safety` says
+   `"allow_web": true`, and then only to read mathematics (papers, documentation, lemma
+   search); never send anything from this machine (file contents, logs, tokens, keys,
+   environment variables) in a query or URL. Never contact other hosts except through `p2m`,
+   `git` (the two cloned repos) and the setup scripts.
 6. Long commands: the Bash tool times out. Run anything that may exceed ~5 minutes
    (`prepare.sh`, `p2m check`, `p2m submit`, `lake build`) in the background with output
    redirected to a file under `.autoprover/`, then poll the file (and `ps`) every minute or two.
 
 ## Step 0: prepare
 
-0. Safety self-check, before reading anything from Prove2me: look at the list of tools you
-   have. If any tool name starts with `mcp__` (a connector), or WebSearch or WebFetch is
-   available, the routine is set up wrongly. Do not continue: run `p2m summary --needs-user
-   --stop-reason "unsafe routine setup: connectors or web tools are attached (<their names>);
-   remove them (SETUP.md step 5)"`, then do steps 4 and 5 and stop.
+0. Safety self-check, before reading anything from Prove2me: run `p2m safety` and look at the
+   list of tools you have. The routine is set up wrongly if any tool name starts with `mcp__`
+   (a connector), or if WebSearch or WebFetch is available while `p2m safety` says
+   `"allow_web": false`. Then do not continue: run `p2m summary --needs-user --stop-reason
+   "unsafe routine setup: <tool names> available but not allowed; remove them (SETUP.md
+   step 5)"`, then do steps 4 and 5 and stop.
 1. Usage gate (first, before any setup): `p2m usage > .autoprover/usage.json; echo $?`.
    Then, whatever its result, keep the Prove2me key from expiring:
    `p2m renew-key > .autoprover/renew.json 2>&1; echo $?`. It mints a fresh key on every run,
