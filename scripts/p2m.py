@@ -529,9 +529,15 @@ def cmd_renew_key(api: Api, cfg: dict, args) -> None:
     print(json.dumps({"renewed": True, "valid_until": valid}))
 
 
+BUILTIN_MCP_PREFIXES = ("mcp__github__", "mcp__claude-code-remote__")
+
+
 def cmd_safety(api, cfg: dict, args) -> None:
     """Offline: which optional tool classes this data repo allows (for the run's self-check)."""
-    print(json.dumps({"allow_web": cfg.get("allow_web") is True, "allow_connectors": False}))
+    print(json.dumps({"allow_web": cfg.get("allow_web") is True, "allow_connectors": False,
+                      # MCP servers built into every Claude Code cloud session (not the user's
+                      # connectors): tolerated by the self-check, never used by a run.
+                      "builtin_mcp_prefixes": list(BUILTIN_MCP_PREFIXES)}))
 
 
 SECRET_VAR = "AUTOPROVER_ENCRYPTION_SECRET"

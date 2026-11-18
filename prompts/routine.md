@@ -36,8 +36,9 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    built-in usage checkpoint): use the printed `decision.reason` / usage-gate reason as the stop
    reason. Never try to work around the usage gate.
 7. Attack surface: use only Bash, Read, Write, Edit, Glob and Grep, plus PushNotification for
-   the final notification. Never use connector / MCP tools (any tool whose name starts with
-   `mcp__`), even if they are available. Use WebSearch and WebFetch only if `p2m safety` says
+   the final notification. Never use any MCP tool (name starting with `mcp__`), even if it is
+   available: not the user's connectors, and not the tools built into the cloud session
+   (`mcp__github__…`; use `git` for the two repos). Use WebSearch and WebFetch only if `p2m safety` says
    `"allow_web": true`, and then only to read mathematics (papers, documentation, lemma
    search); never send anything from this machine (file contents, logs, tokens, keys,
    environment variables) in a query or URL. Never contact other hosts except through `p2m`,
@@ -50,8 +51,9 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
 
 0. Safety self-check, before reading anything from Prove2me: run `p2m safety` and look at the
    list of tools you have. The routine is set up wrongly if any tool name starts with `mcp__`
-   (a connector), or if WebSearch or WebFetch is available while `p2m safety` says
-   `"allow_web": false`. Then do not continue: run `p2m summary --needs-user --stop-reason
+   but not with one of the `builtin_mcp_prefixes` that `p2m safety` lists (those are built into
+   every cloud session; anything else is a connector), or if WebSearch or WebFetch is available
+   while `p2m safety` says `"allow_web": false`. Then do not continue: run `p2m summary --needs-user --stop-reason
    "unsafe routine setup: <tool names> available but not allowed; remove them (SETUP.md
    step 5)"`, then do steps 4 and 5 and stop.
 1. Usage gate (first, before any setup): `p2m usage > .autoprover/usage.json; echo $?`.
