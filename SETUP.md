@@ -97,7 +97,9 @@ At [claude.ai/code](https://claude.ai/code), open the environment selector and c
   PROVE2ME_CREDENTIALS={"api_key":"p2m_..."}
   BASH_DEFAULT_TIMEOUT_MS=600000
   BASH_MAX_TIMEOUT_MS=1800000
+  ENABLE_CLAUDEAI_MCP_SERVERS=false
   ```
+  - `ENABLE_CLAUDEAI_MCP_SERVERS=false` keeps your claude.ai connectors (Gmail, Drive, Slack, ...) out of every run in this environment, even if one is attached to the routine by mistake. It is one layer of several; see step 5.
   - ⚠️ Environment variables are **visible to anyone who uses that environment**. On Team and Enterprise plans, use a **personal** environment, never an organization-shared one.
   - ⚠️ **This first key has two roles.** It logs in until it expires, and it is also the password that encrypts every renewed key in your data repo. **Never delete or change `PROVE2ME_CREDENTIALS`**, even after Prove2me starts rejecting the key in it, or the renewed key can no longer be read.
   - **Optional: separate the two roles.** Add a fourth line, `AUTOPROVER_ENCRYPTION_SECRET=...`, a random secret that becomes the encryption password. Then `PROVE2ME_CREDENTIALS` may be removed after the first successful renewal, and `AUTOPROVER_ENCRYPTION_SECRET` is the variable that must stay. See *Prove2me key renewal* in the README.
@@ -130,15 +132,19 @@ Settings:
   | A full model ID, e.g. `claude-opus-5-5` | Pinned to that exact version; it never changes until you edit the routine. |
 
   In the routine dialog, pick the model by name, e.g. **Opus**. Claude, through the routine API: set the model to the alias `opus`, not a full ID, unless the user asks to pin one.
-- **Tools:** Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch, PushNotification.
-- **Connectors:** none.
+- **Tools:** Bash, Read, Write, Edit, Glob, Grep, PushNotification. **No WebSearch or WebFetch**: a run never needs the web (Lean and Mathlib are local), and web tools would be a way to send data out that bypasses the environment's network allowlist. Claude, through the routine API: also set `disallowed_tools` to `["WebSearch", "WebFetch"]`.
+- **Connectors: none. Remove them all.** Connectors (claude.ai's MCP integrations, such as Gmail, Drive or Slack) are set on the routine, not on the environment, and **all of your connectors are included by default**. In the routine dialog, open **Advanced settings → Connectors** and remove every one.
+  - Why: every run reads text written by strangers on Prove2me. If such text ever misled the agent, an attached connector would let it act in that service under your name. Without connectors, a run can reach only your Prove2me account (through `p2m.py`'s guarded commands) and the two repositories.
+  - Claude, through the routine API: send `clear_mcp_connections: true` when creating the routine, because the server otherwise attaches the user's connectors.
+  - Local MCP servers on your computer never reach cloud runs, and neither do your personal `~/.claude` settings or memory.
+  - **Three layers keep connectors and web tools out:** none attached here, `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the environment (step 4), and a self-check at the start of every run: if any connector or web tool is available, the run stops before reading anything from Prove2me and notifies you.
 - **Schedule:** once a week, at the weekly reset minus `lead_hours` (2 hours) plus 7 minutes, as a cron line in UTC (for example `7 6 * * 2`). The cron is in UTC, so daylight saving does not shift it.
   - Claude: run `python3 scripts/p2m.py schedule` in the tool clone. It reads the reset time from your Claude account and prints the cron line. It needs the `claude` CLI; if that fails, compute the line from the reset time the user noted in step 1.
   - If the line is wrong, the first scheduled run notices that it is outside the window and notifies you with the corrected line. The same happens if your reset time changes later.
 
 If a routine named `prove2me-autoprover` already exists, update it instead of creating a second one.
 
-**Check:** the routine is listed (`/schedule list`, or the routine tool's list action) with both repositories, the environment from step 4 and the cron line above.
+**Check:** the routine is listed (`/schedule list`, or the routine tool's list action) with both repositories, the environment from step 4, the cron line above, the model, the tools above, and no connectors.
 
 ## Step 6. Test run [Claude]
 

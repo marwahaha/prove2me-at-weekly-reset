@@ -78,6 +78,7 @@ All Prove2me traffic goes through [`scripts/p2m.py`](scripts/p2m.py), so the saf
 - **Proof-sketches build only on lemmas that already exist.** A sketch, or "reduction", proves a target from other platform theorems that may still be open. The helper mirrors each imported theorem locally as an `axiom`, so `#print axioms` names it explicitly. Those names are allowed and nothing else is. The tool never creates new problems or definitions on Prove2me, and never votes or rates. The only other write is an opt-in, rate-limited dead-end note in a mission discussion (see *Discussions*).
 - **Dry run.** This is the default. Proofs are attempted and fully checked, but nothing is submitted. Would-be submissions are saved to your data repo for you to read.
 - **Caps:** `max_claims_per_run`, `max_submissions_per_run` and `minutes_per_claim`.
+- **Small attack surface.** A run has only shell and file tools: no claude.ai connectors (Gmail, Drive, Slack, ...) and no web search or web fetch, so text read on Prove2me can never make it act in your other services or send data to arbitrary sites. Three layers enforce this: the routine's settings, `ENABLE_CLAUDEAI_MCP_SERVERS=false` in the environment, and a self-check at the start of every run that stops if any connector or web tool is available. Connectors are attached by default when a routine is created; [SETUP.md](SETUP.md) step 5 says how to remove them.
 - **Secrets stay out of the transcript and logs.** The agent never needs to read your API key, because the helper does.
 
 ### Prove2me key renewal
