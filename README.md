@@ -1,4 +1,4 @@
-# prove2me-autoprover
+# prove2me-at-weekly-reset
 
 A community tool for people who have both a Claude subscription and a [Prove2me](https://prove2.me) account. It uses the part of your weekly Claude allowance that would otherwise go unused. In the last hours before your weekly limit resets, a scheduled cloud agent attempts proofs of open Lean 4 theorems on Prove2me, and submits only the proofs that pass strict local checks.
 
@@ -21,7 +21,7 @@ This repository is the shared tool. Everything personal stays with you:
 | Cloud environment + routine on claude.ai | you |
 | Scripts and agent prompt | this repo, attached to your routine next to your data repo |
 
-Proofs are submitted under your Prove2me account. Every one says at the very beginning that it was proved automatically by prove2me-autoprover, with a link to this repository: the first line of the Lean file is a comment saying so, and so is the first line of its explanation. This is not configurable.
+Proofs are submitted under your Prove2me account. Every one says at the very beginning that it was proved automatically by prove2me-at-weekly-reset, with a link to this repository: the first line of the Lean file is a comment saying so, and so is the first line of its explanation. This is not configurable.
 
 ## How a run works
 
@@ -115,7 +115,7 @@ Prove2me API keys expire after 30 days, but you paste one only once. Every run, 
 Setup is in [SETUP.md](SETUP.md). The easiest way is to let Claude do it: paste this line into Claude Code (the app or the CLI) and answer its questions.
 
 ```
-Set up prove2me-autoprover for me by following SETUP.md in github.com/sattath/prove2me-autoprover
+Set up prove2me-at-weekly-reset for me by following SETUP.md in github.com/sattath/prove2me-at-weekly-reset
 ```
 
 Claude creates your private data repo, the routine and its schedule, and runs a test. You do the parts only you can do, in the browser: turn off paid extra usage, mint your Prove2me key and create the cloud environment (there is no API for that yet). Claude gives you the exact values to paste. You can also follow SETUP.md by hand; every step says who does it and how to check it.
@@ -147,7 +147,7 @@ Every Prove2me mission has a discussion thread where contributors share strategi
 - a serious attempt only: the theorem was fetched at least 15 minutes earlier and checked locally at least 3 times in this run;
 - only in the discussion of a mission that contains the theorem, and only while the theorem is still open;
 - no duplicates: nothing if your account already commented on this theorem in the last 30 days, or if an `attempt` comment from the last 30 days already names the same missing lemma;
-- a fixed template ("Automated note from prove2me-autoprover (dead end, unattended run)", target, what was tried, where it got stuck, and optionally the missing lemma, the source and a link to the failed submission), with each field cut to one plain line of 200 to 300 characters and stripped of HTML, markdown links and URLs;
+- a fixed template ("Automated note from prove2me-at-weekly-reset (dead end, unattended run)", target, what was tried, where it got stuck, and optionally the missing lemma, the source and a link to the failed submission), with each field cut to one plain line of 200 to 300 characters and stripped of HTML, markdown links and URLs;
 - in dry run, nothing is posted: the would-be comment goes into the run log;
 - if any lookup needed for these checks fails, nothing is posted, and a failed post is never retried.
 
@@ -165,7 +165,7 @@ At the end of each run, the tool can tell you what happened. Set `notify` in `au
 
 Runs that stop at a usage cap, or near the reset, don't notify by themselves; their log is pushed.
 
-A message looks like `prove2me-autoprover: 2 accepted (theorem_a, theorem_b), 1 rejected (CE). Log: logs/<run_id>.md`, or `prove2me-autoprover needs you: Prove2me API key missing or rejected; ...`.
+A message looks like `prove2me-at-weekly-reset: 2 accepted (theorem_a, theorem_b), 1 rejected (CE). Log: logs/<run_id>.md`, or `prove2me-at-weekly-reset needs you: Prove2me API key missing or rejected; ...`.
 
 **Push notification (default).** The agent sends the message as a Claude push notification. You receive it if the Claude mobile or desktop app is signed in to the same account with notifications turned on. If push isn't available in a run, nothing is sent; the log is always the full record.
 

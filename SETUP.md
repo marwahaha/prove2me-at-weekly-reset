@@ -1,4 +1,4 @@
-# Setting up prove2me-autoprover
+# Setting up prove2me-at-weekly-reset
 
 This file serves two readers:
 
@@ -6,7 +6,7 @@ This file serves two readers:
 - **Claude**, setting it up for you: paste this line into Claude Code (the app or the CLI) and answer its questions:
 
   ```
-  Set up prove2me-autoprover for me by following SETUP.md in github.com/sattath/prove2me-autoprover
+  Set up prove2me-at-weekly-reset for me by following SETUP.md in github.com/sattath/prove2me-at-weekly-reset
   ```
 
 Every step is marked **[You]** (only you can do it, usually in a browser) or **[Claude]** (Claude does it; by hand you do it yourself). Every step ends with a **Check**, so a step that is already done is skipped, and running the setup again is safe.
@@ -31,7 +31,7 @@ Read this whole file before starting. Then:
 - A GitHub account, connected to Claude Code on the web: claude.ai/code must be able to clone your private repositories.
 - For Claude-driven setup: the `gh` CLI, signed in (`gh auth login`).
 
-**Check [Claude]:** `gh auth status` succeeds, and `gh repo view sattath/prove2me-autoprover` works (while the tool repo is private, this needs access to it).
+**Check [Claude]:** `gh auth status` succeeds, and `gh repo view sattath/prove2me-at-weekly-reset` works (while the tool repo is private, this needs access to it).
 
 ## Step 1. Turn off paid extra usage [You]
 
@@ -55,7 +55,7 @@ On prove2.me, log in, open the account menu and click **API key**. Your secret v
 
 Your data repo holds your settings (`autoprover.config.json`) and the run logs. It must be **private**.
 
-1. Ask the user for the repo name (default `prove2me-autoprover-data`) and whether to create it under their GitHub account.
+1. Ask the user for the repo name (default `prove2me-at-weekly-reset-data`) and whether to create it under their GitHub account.
 2. Create it from the files in [`template/`](template/):
 
    ```bash
@@ -63,7 +63,7 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
    cp -R <tool clone>/template/. <name>/
    ```
 
-   `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-autoprover` if needed.
+   `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-at-weekly-reset` if needed.
 3. Ask the user's choices for `autoprover.config.json`, one at a time, and write them:
    - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: then runs take open theorems from the whole library, most votes first.
    - What runs attempt, in this order (`selection.sources`, default `["saved", "missions", "fields", "search"]`): first the theorems the user saved on prove2.me; then the open leaves of the missions listed in `mission_ids`; then the open leaves of unfinished missions in the chosen `fields` (at most `missions_per_run`, default 30, a different sample each week; highest closability first); and only when no fields are chosen, all open theorems, most votes first, then shortest statement (`query` and `tags` narrow this search). Choosing specific theorems always wins over the fields.
@@ -82,7 +82,7 @@ There is no command or API for creating a cloud environment yet, so this step is
 
 At [claude.ai/code](https://claude.ai/code), open the environment selector and choose **New environment** (or edit the one you already use for this tool). Fill in:
 
-- **Name:** `prove2me-autoprover`.
+- **Name:** `prove2me-at-weekly-reset`.
 - **Network access: Custom.** Tick *Also include default list of common package managers*, and add:
   ```
   prove2.me
@@ -118,7 +118,7 @@ The routine is the scheduled cloud agent that does the work. Claude creates it w
 
 Settings:
 
-- **Name:** `prove2me-autoprover`.
+- **Name:** `prove2me-at-weekly-reset`.
 - **Repositories:** your private data repo and this tool repo, nothing else. The routine clones both; logs are pushed only to the data repo.
   - While this repo is private, attaching it is the only way a run can get the tool. Once it is public, the plan is to attach only the data repo and have each run download the tool at a pinned version with [`scripts/bootstrap.sh`](scripts/bootstrap.sh) (variable `AUTOPROVER_REF`).
 - **Environment:** the one from step 4.
@@ -143,7 +143,7 @@ Settings:
   - Claude: run `python3 scripts/p2m.py schedule` in the tool clone. It reads the reset time from your Claude account and prints the cron line. It needs the `claude` CLI; if that fails, compute the line from the reset time the user noted in step 1.
   - If the line is wrong, the first scheduled run notices that it is outside the window and notifies you with the corrected line. The same happens if your reset time changes later.
 
-If a routine named `prove2me-autoprover` already exists, update it instead of creating a second one.
+If a routine named `prove2me-at-weekly-reset` already exists, update it instead of creating a second one.
 
 **Check:** the routine is listed (`/schedule list`, or the routine tool's list action) with both repositories, the environment from step 4, the cron line above, the model, the tools above, and no connectors.
 
@@ -174,7 +174,7 @@ Common problems:
 
 ## Step 7. Go live [Claude, with your yes]
 
-After reading a few dry-run logs (scheduled runs write one every week), the user decides whether to go live. With their explicit yes, set `"dry_run": false` in `autoprover.config.json`, commit and push. From then on, proofs that pass every local check are submitted under the user's Prove2me account, each starting with a line saying it was proved automatically by prove2me-autoprover, with a link to the tool.
+After reading a few dry-run logs (scheduled runs write one every week), the user decides whether to go live. With their explicit yes, set `"dry_run": false` in `autoprover.config.json`, commit and push. From then on, proofs that pass every local check are submitted under the user's Prove2me account, each starting with a line saying it was proved automatically by prove2me-at-weekly-reset, with a link to the tool.
 
 **Check:** `autoprover.config.json` on the default branch has the intended `dry_run` value.
 

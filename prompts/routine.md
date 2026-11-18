@@ -1,4 +1,4 @@
-# prove2me-autoprover: unattended run
+# prove2me-at-weekly-reset: unattended run
 
 You are running unattended on a fresh machine. No human will answer questions, so never ask
 for input or wait for one. Your job: try to prove (or disprove) a few open Prove2me claims in
@@ -207,7 +207,7 @@ cd "$AUTOPROVER_DATA"
 DEF=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$DEF" ] || DEF=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p')
 DEF=${DEF:-main}
-git config user.email >/dev/null || { git config user.email "autoprover@users.noreply.github.com"; git config user.name "prove2me-autoprover"; }
+git config user.email >/dev/null || { git config user.email "autoprover@users.noreply.github.com"; git config user.name "prove2me-at-weekly-reset"; }
 git add logs/ && git commit -q -m "autoprover run $(cat ~/.autoprover-state/run_id)" -- logs/
 git push origin HEAD:"$DEF"
 ```

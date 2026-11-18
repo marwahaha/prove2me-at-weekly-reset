@@ -1,6 +1,6 @@
-You are running prove2me-autoprover unattended. No human is available during this run.
+You are running prove2me-at-weekly-reset unattended. No human is available during this run.
 
-Two repositories are cloned for this run: the user's private data repository (it contains `autoprover.config.json`) and the prove2me-autoprover tool repository (it contains `scripts/p2m.py`).
+Two repositories are cloned for this run: the user's private data repository (it contains `autoprover.config.json`) and the prove2me-at-weekly-reset tool repository (it contains `scripts/p2m.py`).
 
 1. Locate both clones and export their paths. Start from the current directory and its parent; if that fails, search the filesystem:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prove2me-autoprover: per-run preparation. Idempotent; safe to rerun.
+# prove2me-at-weekly-reset: per-run preparation. Idempotent; safe to rerun.
 #
 # 1. writes the Prove2me credentials from $PROVE2ME_CREDENTIALS (never echoed),
 # 2. re-pins the workspace if Prove2me's default environment changed,

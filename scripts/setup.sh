@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prove2me-autoprover: environment setup (the slow, cacheable part).
+# prove2me-at-weekly-reset: environment setup (the slow, cacheable part).
 #
 # Installs elan (Lean's version manager), the Lean toolchain of the Prove2me
 # default environment, the prove2me_workspace, and Mathlib's prebuilt cache.

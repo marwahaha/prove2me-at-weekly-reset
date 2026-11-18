@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""prove2me-autoprover helper: Prove2me API client, claim selection, local gates.
+"""prove2me-at-weekly-reset helper: Prove2me API client, claim selection, local gates.
 
 The agent drives everything through this script so that
   * the API key never has to appear in the agent's context or in logs,
@@ -40,7 +40,7 @@ WS = Path(os.environ.get("PROVE2ME_WORKSPACE", Path.home() / "prove2me_workspace
 CREDS = Path(os.environ.get("PROVE2ME_CREDENTIALS_FILE", WS / "credentials.json"))
 STATE = Path(os.environ.get("AUTOPROVER_STATE", Path.home() / ".autoprover-state"))  # per-run scratch
 LOGS = DATA / "logs"  # run logs, committed to the data repo
-SOURCE_URL = os.environ.get("AUTOPROVER_SOURCE_URL", "https://github.com/sattath/prove2me-autoprover")
+SOURCE_URL = os.environ.get("AUTOPROVER_SOURCE_URL", "https://github.com/sattath/prove2me-at-weekly-reset")
 MIRRORS = STATE / "mirrored_modules.json"  # module -> platform id/name/status
 
 # Axioms Lean/Mathlib proofs normally rely on. Anything else (sorryAx,
@@ -484,7 +484,7 @@ def _push_key_file() -> str | None:
     branch = ref.split("/", 1)[1] if ref.startswith("origin/") else "main"
     if not git("config", "user.email").stdout.strip():
         git("config", "user.email", "autoprover@users.noreply.github.com")
-        git("config", "user.name", "prove2me-autoprover")
+        git("config", "user.name", "prove2me-at-weekly-reset")
     git("add", "--", rel)
     c = git("commit", "-q", "-m", "autoprover: renew Prove2me API key (encrypted)", "--", rel)
     if c.returncode != 0 and "nothing" not in (c.stdout + c.stderr):
@@ -1067,9 +1067,9 @@ DEADEND_CAPS = {"route": 300, "stuck": 300, "missing": 200, "source": 200}
 
 def deadend_body(theorem_id: str, theorem_name: str, f: dict, submission_id: str | None) -> str:
     tool = SOURCE_URL if re.match(r"^https://[^\s()\[\]<>]+$", SOURCE_URL) else \
-        "https://github.com/sattath/prove2me-autoprover"
+        "https://github.com/sattath/prove2me-at-weekly-reset"
     name = sanitize_field(theorem_name, 200).replace("`", "")
-    parts = [f"**Automated note from [prove2me-autoprover]({tool})** (dead end, unattended run)",
+    parts = [f"**Automated note from [prove2me-at-weekly-reset]({tool})** (dead end, unattended run)",
              f"Target: [`{name}`](p2m:theorem/{theorem_id})",
              f"Tried: {f['route']}", f"Stuck: {f['stuck']}"]
     if f.get("missing"):
@@ -1341,14 +1341,14 @@ def cmd_check(api: Api, cfg: dict, args) -> None:
     sys.exit(0 if res["ok"] else 2)
 
 
-TOOL_NOTICE = f"-- Proved automatically by prove2me-autoprover ({SOURCE_URL}), an unattended Claude Code agent."
+TOOL_NOTICE = f"-- Proved automatically by prove2me-at-weekly-reset ({SOURCE_URL}), an unattended Claude Code agent."
 
 
 def add_tool_notice(sol: Path) -> None:
     """Make the solution's very first line say which tool proved it (a Lean comment, which
     may precede the imports). Idempotent; the gates then run on the file with the notice."""
     text = sol.read_text()
-    if not text.startswith("-- Proved automatically by prove2me-autoprover"):
+    if not text.startswith("-- Proved automatically by prove2me-at-weekly-reset"):
         sol.write_text(TOOL_NOTICE + "\n" + text)
 
 
@@ -1369,7 +1369,7 @@ def cmd_submit(api: Api, cfg: dict, args) -> None:
         die("local gates failed; not submitting", 2)
     explanation = Path(args.explanation_file).read_text() if args.explanation_file else ""
     # Always marked, at the top, not configurable.
-    explanation = (f"*Proved automatically by [prove2me-autoprover]({SOURCE_URL}), "
+    explanation = (f"*Proved automatically by [prove2me-at-weekly-reset]({SOURCE_URL}), "
                    "an unattended Claude Code agent.*\n\n" + explanation)
     base = {"theorem_id": args.theorem_id, "theorem_name": res["theorem_name"],
             "proof_type": args.proof_type, "sha256": res["sha256"]}
@@ -1691,7 +1691,7 @@ def cmd_summary(api: Api | None, cfg: dict, args) -> None:
     mode = "DRY RUN (nothing submitted)" if cfg["dry_run"] else "LIVE"
     if cfg.get("test_run") is True:
         mode = "TEST RUN (dry run, at most one claim, window ignored)"
-    lines = [f"# prove2me-autoprover run {rid}", "", f"Mode: **{mode}**", ""]
+    lines = [f"# prove2me-at-weekly-reset run {rid}", "", f"Mode: **{mode}**", ""]
     if args.stop_reason:
         lines += [f"Stopped because: {args.stop_reason}", ""]
     lines += ["| Theorem | Outcome | Submission | Note |", "|---|---|---|---|"]
@@ -1820,15 +1820,15 @@ def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
         parts.append(f"{len(posted)} dead-end note(s) posted to mission discussions")
     if attention:
         extra = f" (also: {'; '.join(parts)})" if parts else ""
-        return f"prove2me-autoprover needs you: {attention}{extra}. {log}"
+        return f"prove2me-at-weekly-reset needs you: {attention}{extra}. {log}"
     if parts:
-        return f"prove2me-autoprover: {', '.join(parts)}. {log}"
+        return f"prove2me-at-weekly-reset: {', '.join(parts)}. {log}"
     if results and level == "every_run":
         counts: dict[str, int] = {}
         for e in results:
             counts[e.get("status", "?")] = counts.get(e.get("status", "?"), 0) + 1
         tally = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
-        return f"prove2me-autoprover: nothing submitted; {len(results)} claim(s) attempted ({tally}). {log}"
+        return f"prove2me-at-weekly-reset: nothing submitted; {len(results)} claim(s) attempted ({tally}). {log}"
     return None
 
 
@@ -1843,7 +1843,7 @@ def webhook_request(url: str, message: str) -> tuple[bytes, dict]:
         return json.dumps({"text": message}).encode(), {"Content-Type": "application/json"}
     if host in ("discord.com", "discordapp.com") or host.endswith((".discord.com", ".discordapp.com")):
         return json.dumps({"content": message}).encode(), {"Content-Type": "application/json"}
-    return message.encode(), {"Content-Type": "text/plain; charset=utf-8", "Title": "prove2me-autoprover"}
+    return message.encode(), {"Content-Type": "text/plain; charset=utf-8", "Title": "prove2me-at-weekly-reset"}
 
 
 def cmd_notify(api: Api | None, cfg: dict, args) -> None:
@@ -1863,7 +1863,7 @@ def cmd_notify(api: Api | None, cfg: dict, args) -> None:
         print("warning: notify: webhook URL is not http(s); nothing sent", file=sys.stderr)
         return
     body, headers = webhook_request(url, message)
-    req = urllib.request.Request(url, data=body, headers={**headers, "User-Agent": "prove2me-autoprover"},
+    req = urllib.request.Request(url, data=body, headers={**headers, "User-Agent": "prove2me-at-weekly-reset"},
                                  method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as r:

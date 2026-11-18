@@ -110,10 +110,10 @@ class ToolNoticeTests(unittest.TestCase):
         m.add_tool_notice(sol)
         m.add_tool_notice(sol)  # idempotent
         lines = sol.read_text().splitlines()
-        self.assertTrue(lines[0].startswith("-- Proved automatically by prove2me-autoprover ("))
+        self.assertTrue(lines[0].startswith("-- Proved automatically by prove2me-at-weekly-reset ("))
         self.assertIn(m.SOURCE_URL, lines[0])
         self.assertEqual(lines[1], "import Mathlib")
-        self.assertEqual(sum(1 for l in lines if "prove2me-autoprover" in l), 1)
+        self.assertEqual(sum(1 for l in lines if "prove2me-at-weekly-reset" in l), 1)
         self.assertIn("Theorems.Thm_foo", m.platform_imports(sol.read_text()))
 
 

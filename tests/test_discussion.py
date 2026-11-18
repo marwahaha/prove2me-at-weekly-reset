@@ -261,8 +261,8 @@ class Template(Base):
                            stuck="Stuck <i>here</i> " + "s" * 400, missing="m" * 500,
                            source="Paper, Lemma 2 https://arxiv.org/abs/1", submission=SUB)[1]
         body = out["body_md"]
-        self.assertTrue(body.startswith("**Automated note from [prove2me-autoprover]("
-                                        "https://github.com/sattath/prove2me-autoprover)** (dead end, unattended run)"))
+        self.assertTrue(body.startswith("**Automated note from [prove2me-at-weekly-reset]("
+                                        "https://github.com/sattath/prove2me-at-weekly-reset)** (dead end, unattended run)"))
         self.assertIn(f"Target: [`Foo.bar_baz`](p2m:theorem/{TID})", body)
         lines = body.split("\n\n")
         tried = next(l for l in lines if l.startswith("Tried: "))
@@ -275,7 +275,7 @@ class Template(Base):
         self.assertEqual(source, "Source: Paper, Lemma 2")
         self.assertNotIn("<i>", body)
         urls = [u for u in __import__("re").findall(r"\]\(([^)]*)\)", body)]
-        self.assertEqual(urls, ["https://github.com/sattath/prove2me-autoprover",
+        self.assertEqual(urls, ["https://github.com/sattath/prove2me-at-weekly-reset",
                                 f"p2m:theorem/{TID}", f"p2m:solution/{SUB}"])
         self.assertNotIn("arxiv", body)
 
