@@ -65,8 +65,8 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 
    `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-autoprover` if needed.
 3. Ask the user's choices for `autoprover.config.json`, one at a time, and write them:
-   - **`selection`:** what to attempt.
-     - `sources` can include `saved` (your saved list on prove2.me, the easiest way to steer it), `missions` (the open leaves of the `mission_ids` you list) and `search` (`query`, `tags`, `sort`).
+   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Offer the user the fields that fit their interests, let them pick any number, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: then runs take open theorems from the whole library, most votes first.
+   - What runs attempt, in this order (`selection.sources`, default `["saved", "missions", "fields", "search"]`): first the theorems the user saved on prove2.me; then the open leaves of the missions listed in `mission_ids`; then the open leaves of unfinished missions in the chosen `fields` (at most `missions_per_run`, default 30, a different sample each week; highest closability first); and only when no fields are chosen, all open theorems, most votes first, then shortest statement (`query` and `tags` narrow this search). Choosing specific theorems always wins over the fields.
      - Filters: `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.
    - **`dry_run`:** keep it `true` for now. Step 7 switches to live.
    - **`notify`:** when to send a notification: `important` (default), `every_run` or `off`. See *Notifications* in the README.
@@ -174,7 +174,7 @@ Common problems:
 
 ## Step 7. Go live [Claude, with your yes]
 
-After reading a few dry-run logs (scheduled runs write one every week), the user decides whether to go live. With their explicit yes, set `"dry_run": false` in `autoprover.config.json`, commit and push. From then on, proofs that pass every local check are submitted under the user's Prove2me account, each with a footer saying it was made by prove2me-autoprover.
+After reading a few dry-run logs (scheduled runs write one every week), the user decides whether to go live. With their explicit yes, set `"dry_run": false` in `autoprover.config.json`, commit and push. From then on, proofs that pass every local check are submitted under the user's Prove2me account, each starting with a line saying it was proved automatically by prove2me-autoprover, with a link to the tool.
 
 **Check:** `autoprover.config.json` on the default branch has the intended `dry_run` value.
 

@@ -21,7 +21,7 @@ This repository is the shared tool. Everything personal stays with you:
 | Cloud environment + routine on claude.ai | you |
 | Scripts and agent prompt | this repo, attached to your routine next to your data repo |
 
-Proofs are submitted under your Prove2me account, and every one carries a footer saying it was made by prove2me-autoprover in an unattended run.
+Proofs are submitted under your Prove2me account. Every one says at the very beginning that it was proved automatically by prove2me-autoprover, with a link to this repository: the first line of the Lean file is a comment saying so, and so is the first line of its explanation. This is not configurable.
 
 ## How a run works
 
@@ -37,7 +37,7 @@ Proofs are submitted under your Prove2me account, and every one carries a footer
  Claude, following prompts/routine.md:
    p2m.py usage       go only inside the last lead_hours before the weekly reset and below the caps
    p2m.py renew-key   every run, go or no-go: mint a fresh Prove2me key (stored encrypted)
-   p2m.py candidates  shortlist from your saved list / missions / search, per your config
+   p2m.py candidates  shortlist: your saved list, named missions, then your fields (or most-voted)
    p2m.py fetch       mirror the target and every platform module it imports
    p2m.py usage --for start-claim   before each claim; gives the claim's time budget
    write Solutions/Sol_<name>.lean, loop on  p2m.py check   (usage checkpoint, then build)

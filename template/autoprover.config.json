@@ -25,8 +25,10 @@
   "notify": "important",
 
   "selection": {
-    "sources": ["saved", "missions", "search"],
+    "sources": ["saved", "missions", "fields", "search"],
     "mission_ids": [],
+    "fields": [],
+    "missions_per_run": 30,
     "tags": [],
     "query": "",
     "sort": "votes",

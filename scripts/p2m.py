@@ -91,8 +91,14 @@ DEFAULT_CONFIG = {
     "notify": "important",
     "notify_webhook_url": "",  # prefer the AUTOPROVER_WEBHOOK_URL environment variable
     "selection": {
-        "sources": ["saved", "missions", "search"],
+        # Tried in this order; earlier sources fill the shortlist first. "fields": open
+        # leaves of unfinished missions in the listed fields (`p2m fields` lists them),
+        # highest closability first. "search": all open theorems, most votes first, used
+        # only when no fields are given.
+        "sources": ["saved", "missions", "fields", "search"],
         "mission_ids": [],
+        "fields": [],
+        "missions_per_run": 30,
         "tags": [],
         "query": "",
         "sort": "votes",
@@ -699,12 +705,69 @@ def _theorem_rows(api: Api, cfg: dict, env_rev: str) -> list[dict]:
                 for leaf in leaves:
                     add({"theorem_id": leaf["theorem_id"], "theorem_name": leaf["theorem_name"]},
                         f"mission:{m.get('name', mid)}", {"closability": leaf.get("closability", 0)})
+        elif source == "fields":
+            for r in _field_rows(api, sel):
+                add(r, r.pop("_mission"), {"closability": r.get("closability", 0)})
         elif source == "search":
-            res = api.get("/theorems", status="Open", sort=sel["sort"], limit=200, env=env_rev,
-                          q=sel["query"], tags=",".join(sel["tags"]))
-            for r in res["theorems"]:
+            if sel.get("fields"):
+                continue  # the fields' frontiers replace the global search
+            params = {"status": "Open", "sort": sel["sort"], "limit": 200, "env": env_rev}
+            if sel["query"]:
+                params["q"] = sel["query"]
+            res = api.get("/theorems", **params)["theorems"]
+            # Prove2me's server-side tags filter returns HTTP 500; filter here (any tag).
+            want = {t.lower() for t in sel.get("tags") or []}
+            if want:
+                res = [r for r in res if want & {t.lower() for t in r.get("tags") or []}]
+            # Few theorems have votes, so break ties by the shortest statement.
+            res.sort(key=lambda r: (-(r.get("vote_count") or 0), len(r.get("formal_statement") or "")))
+            for r in res:
                 add(r, "search")
     return rows
+
+
+def _field_rows(api: Api, sel: dict) -> list[dict]:
+    """Open leaves of unfinished missions in the selected fields. A different sample of
+    at most `missions_per_run` matching missions is examined each week."""
+    import random
+    wanted = {f.lower() for f in sel.get("fields") or []}
+    if not wanted:
+        return []
+    missions, offset = [], 0
+    while True:
+        page = api.get("/missions", limit=100, offset=offset)
+        batch = page.get("missions", [])
+        missions += [m for m in batch
+                     if wanted & {(f.get("slug") or "").lower() for f in m.get("fields") or []}
+                     and (m.get("main_theorem") or {}).get("status") == "Open"]
+        offset += len(batch)
+        if len(batch) < 100 or offset >= page.get("total", offset) or offset >= 20000:
+            break
+    week = dt.date.today().isocalendar()
+    random.Random(f"{week[0]}-{week[1]}").shuffle(missions)
+    leaves = []
+    for m in missions[: int(sel.get("missions_per_run", 30))]:
+        root = m["main_theorem"]["theorem_id"]
+        for leaf in api.get(f"/theorems/{root}/open-leaves", limit=50).get("open_leaves", []):
+            leaves.append({"theorem_id": leaf["theorem_id"], "theorem_name": leaf["theorem_name"],
+                           "closability": leaf.get("closability", 0),
+                           "_mission": f"field:{m.get('name', m.get('id'))}"})
+    leaves.sort(key=lambda r: -r["closability"])  # stable: ties keep this week's order
+    return leaves
+
+
+def cmd_fields(api: Api, cfg: dict, args) -> None:
+    """List Prove2me's fields (slug, name, missions, unfinished), most missions first."""
+    out, offset = [], 0
+    while True:
+        page = api.get("/fields", sort="popular", limit=200, offset=offset, **({"q": args.q} if args.q else {}))
+        out += page.get("fields", [])
+        offset += 200
+        if len(page.get("fields", [])) < 200:
+            break
+    print(json.dumps([{"slug": f["slug"], "name": f["name"], "missions": f.get("mission_count", 0),
+                       "unfinished": f.get("mission_count", 0) - (f.get("completed_count") or 0)}
+                      for f in out if f.get("mission_count")], indent=1))
 
 
 def cmd_candidates(api: Api, cfg: dict, args) -> None:
@@ -1278,6 +1341,17 @@ def cmd_check(api: Api, cfg: dict, args) -> None:
     sys.exit(0 if res["ok"] else 2)
 
 
+TOOL_NOTICE = f"-- Proved automatically by prove2me-autoprover ({SOURCE_URL}), an unattended Claude Code agent."
+
+
+def add_tool_notice(sol: Path) -> None:
+    """Make the solution's very first line say which tool proved it (a Lean comment, which
+    may precede the imports). Idempotent; the gates then run on the file with the notice."""
+    text = sol.read_text()
+    if not text.startswith("-- Proved automatically by prove2me-autoprover"):
+        sol.write_text(TOOL_NOTICE + "\n" + text)
+
+
 def cmd_submit(api: Api, cfg: dict, args) -> None:
     sol = Path(args.file)
     if args.proof_type == "disprove" and not cfg["allow_disproofs"]:
@@ -1286,6 +1360,7 @@ def cmd_submit(api: Api, cfg: dict, args) -> None:
     if not cfg["dry_run"] and len(submitted) >= cfg["max_submissions_per_run"]:
         die(f"max_submissions_per_run ({cfg['max_submissions_per_run']}) reached", 5)
     require_usage(cfg, "submit", 0)  # always a fresh probe, dry run included
+    add_tool_notice(sol)  # always, not configurable (README: "Proofs are submitted")
     # Re-run every gate on the exact bytes we are about to send.
     res = gate(api, cfg, args.theorem_id, sol, args.proof_type)
     if not res["ok"]:
@@ -1293,9 +1368,9 @@ def cmd_submit(api: Api, cfg: dict, args) -> None:
         print(json.dumps(res, indent=2, ensure_ascii=False))
         die("local gates failed; not submitting", 2)
     explanation = Path(args.explanation_file).read_text() if args.explanation_file else ""
-    # Always marked, not configurable; see README "Automated submissions".
-    explanation += ("\n\n---\n*Submitted automatically by "
-                    f"[prove2me-autoprover]({SOURCE_URL}) (unattended run).*")
+    # Always marked, at the top, not configurable.
+    explanation = (f"*Proved automatically by [prove2me-autoprover]({SOURCE_URL}), "
+                   "an unattended Claude Code agent.*\n\n" + explanation)
     base = {"theorem_id": args.theorem_id, "theorem_name": res["theorem_name"],
             "proof_type": args.proof_type, "sha256": res["sha256"]}
     if cfg["dry_run"]:
@@ -1813,6 +1888,8 @@ def main() -> None:
     sub.add_parser("safety", help="which optional tools (web) the config allows; offline")
     s = sub.add_parser("new-secret", help=f"generate {SECRET_VAR} onto the clipboard (never printed)")
     s.add_argument("--file", help="write it to this private file instead of the clipboard")
+    s = sub.add_parser("fields", help="list Prove2me fields to choose from (for selection.fields)")
+    s.add_argument("q", nargs="?", help="filter by a word in the name or slug")
     sub.add_parser("candidates", help="ranked shortlist of open claims (JSON)")
     s = sub.add_parser("mirror", help="mirror existing platform theorems/definitions to import in a sketch")
     s.add_argument("names", nargs="+", help="platform names or module names (Theorems.Thm_x)")
