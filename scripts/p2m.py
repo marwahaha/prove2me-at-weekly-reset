@@ -203,23 +203,51 @@ def ledger() -> list[dict]:
     return [json.loads(l) for l in f.read_text().splitlines() if l.strip()] if f.exists() else []
 
 
-def previously_attempted() -> set[str]:
-    """Theorem ids attempted in earlier runs, read from the committed logs."""
-    ids: set[str] = set()
-    for f in LOGS.glob("*.jsonl"):
+# Outcomes after which a later run may try the theorem again: solved but never sent
+# (dry run), a Prove2me storage/queue fault, a target that changed under us, and an
+# upload that a later `followup` confirmed never reached Prove2me.
+RETRYABLE_STATUSES = {"DRY_RUN_PASSED_LOCAL_CHECKS", "SERVER_ERROR", "TARGET_CHANGED", "SUBMISSION_LOST"}
+
+
+def log_events() -> list[dict]:
+    """All events of earlier runs, oldest run first (run ids are UTC timestamps)."""
+    out = []
+    for f in sorted(LOGS.glob("*.jsonl")):
         for line in f.read_text().splitlines():
             try:
                 e = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if e.get("status") == "DRY_RUN_PASSED_LOCAL_CHECKS":
-                continue  # solved but never sent; a live run should still try it
-            if e.get("event") in ("result", "submitted") and e.get("theorem_id"):
-                ids.add(e["theorem_id"])
-    return ids
+            if isinstance(e, dict):
+                out.append({**e, "_run": f.stem})
+    return out
+
+
+def previously_attempted() -> set[str]:
+    """Theorem ids attempted in earlier runs, read from the committed logs.
+
+    Each attempt (keyed by attempt id, else submission id) counts with its latest known
+    status, so a later `followup` verdict replaces a PENDING one; an attempt whose latest
+    status is retryable does not count."""
+    latest: dict = {}
+    for i, e in enumerate(log_events()):
+        tid = e.get("theorem_id")
+        if not tid or e.get("event") not in ("result", "submitted", "followup"):
+            continue
+        key = e.get("attempt_id") or e.get("submission_id") or ("line", i)
+        if e.get("status") or key not in latest:
+            latest[key] = (tid, e.get("status"))
+    return {tid for tid, status in latest.values() if status not in RETRYABLE_STATUSES}
 
 
 # ---------------------------------------------------------------- API client
+
+class ApiError(RuntimeError):
+    """A failed API call. `code` is the HTTP status, or None for a network error/timeout."""
+    def __init__(self, msg: str, code: int | None = None) -> None:
+        super().__init__(msg)
+        self.code = code
+
 
 class Api:
     def __init__(self) -> None:
@@ -256,12 +284,12 @@ class Api:
                 if retry and e.code in (429, 502, 503, 504) and attempt < 3:
                     time.sleep(10 * (attempt + 1))
                     continue
-                raise RuntimeError(f"{method} {path} -> HTTP {e.code}: {text}") from None
+                raise ApiError(f"{method} {path} -> HTTP {e.code}: {text}", e.code) from None
             except (urllib.error.URLError, http.client.HTTPException, TimeoutError, ConnectionError) as e:
                 if retry and attempt < 3:
                     time.sleep(5 * (attempt + 1))
                     continue
-                raise RuntimeError(f"{method} {path} -> network error: {e}") from None
+                raise ApiError(f"{method} {path} -> network error: {e}") from None
 
     def get(self, path: str, **params):
         params = {k: v for k, v in params.items() if v not in (None, "")}
@@ -825,21 +853,41 @@ def cmd_candidates(api: Api, cfg: dict, args) -> None:
     print(json.dumps(out, indent=2, ensure_ascii=False))
 
 
+def _definition_row(r: dict) -> dict:
+    """A row of GET /definitions in the shape of a /theorems row."""
+    return {**r, "theorem_id": r.get("theorem_id") or r.get("definition_id"),
+            "theorem_name": r.get("theorem_name") or r.get("definition_name"), "status": "Definition"}
+
+
+def _catalog(api: Api, env_rev: str, status: str | None, **query) -> list[dict]:
+    """GET /theorems rows. Prove2me's catalog hides definitions unless asked for
+    `status=Definition`, even for an exact name; if that filter is refused, GET
+    /definitions (where the exact-name parameter is `definition_name`) instead."""
+    try:
+        return api.get("/theorems", env=env_rev, status=status, **query)["theorems"]
+    except ApiError as e:
+        if status != "Definition" or e.code not in (400, 404, 405, 422, 501):
+            raise
+    if "theorem_name" in query:
+        query["definition_name"] = query.pop("theorem_name")
+    return [_definition_row(r) for r in api.get("/definitions", env=env_rev, **query).get("definitions", [])]
+
+
 def _resolve_module(api: Api, module: str, env_rev: str) -> dict:
     """Find the platform theorem/definition behind `Theorems.Thm_x` / `Definitions.Def_x`."""
     kind, name = module.split(".", 1)
     s = name.split("_", 1)[1]  # strip Thm_/Def_
     status = "Definition" if kind == "Definitions" else None
-    hits = api.get("/theorems", theorem_name=s, env=env_rev)["theorems"]
+    hits = _catalog(api, env_rev, status, theorem_name=s)
     parts = s.split("_")
     for i in range(1, min(len(parts), 5)):  # namespaces come first: A_B_c_d -> A.B.c_d
         if hits:
             break
         guess = ".".join(parts[:i + 1]) + "".join("_" + p for p in parts[i + 1:])
-        hits = api.get("/theorems", theorem_name=guess, env=env_rev)["theorems"]
+        hits = _catalog(api, env_rev, status, theorem_name=guess)
     if not hits:  # theorem names contain dots; the slug replaced them with `_`
         for q in (s.split("_")[-1], s.rsplit("_", 2)[-2] if s.count("_") >= 2 else s):
-            res = api.get("/theorems", q=q, env=env_rev, status=status, limit=200)["theorems"]
+            res = _catalog(api, env_rev, status, q=q, limit=200)
             hits = [r for r in res if slug(r["theorem_name"]) == s]
             if hits:
                 break
@@ -904,7 +952,9 @@ def cmd_fetch(api: Api, cfg: dict, args) -> None:
 
     subs = api.get(f"/theorems/{args.theorem_id}/submissions", limit=50).get("submissions", [])
     decomps = api.get(f"/theorems/{args.theorem_id}/decompositions").get("decompositions", [])
-    ledger_append({"event": "fetched", "theorem_id": t["theorem_id"], "theorem_name": t["theorem_name"]})
+    # What `submit` later compares the live theorem against (see target_changes).
+    ledger_append({"event": "fetched", "theorem_id": t["theorem_id"], "theorem_name": t["theorem_name"],
+                   "mathlib_rev": env_rev, "target_sha256": target_fingerprint(t)})
     missions, missions_error = [], None
     try:
         missions = api.get(f"/theorems/{args.theorem_id}/missions").get("missions", [])
@@ -1225,7 +1275,8 @@ def cmd_mirror(api: Api, cfg: dict, args) -> None:
         if n.startswith(("Theorems.", "Definitions.")):
             mods.append(n)
         else:
-            rows = api.get("/theorems", theorem_name=n, env=env_rev)["theorems"]
+            rows = (api.get("/theorems", theorem_name=n, env=env_rev)["theorems"]
+                    or _catalog(api, env_rev, "Definition", theorem_name=n))  # definitions are hidden otherwise
             if not rows:
                 die(f"no platform theorem/definition named {n} in the default environment")
             kind = "Definitions.Def_" if rows[0]["status"] == "Definition" else "Theorems.Thm_"
@@ -1245,10 +1296,54 @@ def _run(cmd: list[str], timeout_min: int) -> tuple[int, str]:
         return 124, f"timed out after {timeout_min} min"
 
 
+def target_fingerprint(t: dict) -> str:
+    """Identity of a target as `fetch` saw it: name, statement, preamble, environment."""
+    return hashlib.sha256(json.dumps([t.get("theorem_name"), t.get("formal_statement"),
+                                      t.get("preamble") or "", t.get("mathlib_rev")]).encode()).hexdigest()
+
+
+def target_changes(t: dict, theorem_id: str, events: list[dict]) -> list[str]:
+    """Why the live theorem `t` can no longer take the proof started from `fetch`
+    (empty: it still can). Without a `fetch` record (older runs), status and
+    deprecation only."""
+    out = []
+    if t.get("status") != "Open":
+        out.append(f"theorem is no longer Open (status {t.get('status')})")
+    if t.get("deprecated_at"):
+        out.append(f"theorem was deprecated at {t['deprecated_at']}")
+    fetched = [e for e in events if e.get("event") == "fetched" and e.get("theorem_id") == theorem_id
+               and e.get("target_sha256")]
+    if fetched:
+        f = fetched[-1]
+        if f.get("mathlib_rev") and t.get("mathlib_rev") != f["mathlib_rev"]:
+            out.append(f"theorem moved to another environment since `fetch` "
+                       f"(mathlib_rev {f['mathlib_rev'][:12]} -> {str(t.get('mathlib_rev'))[:12]})")
+        elif target_fingerprint(t) != f["target_sha256"]:
+            out.append("formal statement or preamble changed since `fetch`")
+    return out
+
+
+def refuse_stale(res: dict, via: str) -> None:
+    """Exit 9: the target changed (closed, deprecated or edited); stop this claim."""
+    events = ledger()
+    ledger_append({"event": "check", **{k: v for k, v in res.items() if k != "build_log"}})
+    if not any(e.get("event") == "result" and e.get("theorem_id") == res["theorem_id"]
+               and e.get("status") == "TARGET_CHANGED" for e in events):
+        ledger_append({"event": "result", "theorem_id": res["theorem_id"], "theorem_name": res["theorem_name"],
+                       "status": "TARGET_CHANGED", "note": "; ".join(res["stale"])})
+    print(json.dumps(res, indent=2, ensure_ascii=False))
+    die(f"target no longer submittable: {'; '.join(res['stale'])}. Not running `{via}`; "
+        "abandon this claim (already recorded as TARGET_CHANGED) and move on", 9)
+
+
 def gate(api: Api | None, cfg: dict, theorem_id: str, sol: Path, proof_type: str) -> dict:
     """All local checks a solution must pass before it may be submitted."""
     t = api.get(f"/theorems/{theorem_id}")
     name = t["theorem_name"]
+    stale = target_changes(t, theorem_id, ledger())
+    if stale:  # no point building: the target cannot take this proof any more
+        return {"theorem_id": theorem_id, "theorem_name": name, "file": str(sol), "proof_type": proof_type,
+                "ok": False, "stale": stale, "problems": stale}
     text = sol.read_text()
     code = re.sub(r"/-.*?-/", "", text, flags=re.S)
     code = re.sub(r"--[^\n]*", "", code)
@@ -1353,6 +1448,8 @@ def require_usage(cfg: dict, via: str, max_age_s: float) -> None:
 def cmd_check(api: Api, cfg: dict, args) -> None:
     require_usage(cfg, "check", CHECK_USAGE_MAX_AGE_S)
     res = gate(api, cfg, args.theorem_id, Path(args.file), args.proof_type)
+    if res.get("stale"):
+        refuse_stale(res, "check")
     ledger_append({"event": "check", **{k: v for k, v in res.items() if k != "build_log"}})
     print(json.dumps(res, indent=2, ensure_ascii=False))
     sys.exit(0 if res["ok"] else 2)
@@ -1369,17 +1466,135 @@ def add_tool_notice(sol: Path) -> None:
         sol.write_text(TOOL_NOTICE + "\n" + text)
 
 
+# A verdict ERROR with one of these messages is a Prove2me storage/queue fault, not a
+# judgement of the proof: recorded as SERVER_ERROR, which a later run may retry.
+SERVER_ERROR_RE = re.compile(r"could not store the proof file|could not enqueue the submission", re.I)
+# Lost-upload recovery (`submit` after a timeout/5xx, and `followup`).
+RECOVERY_LOOKUPS = 3        # history searches after a failed upload, RECOVERY_WAIT_S apart
+RECOVERY_WAIT_S = 20
+HISTORY_MAX_PAGES = 10      # of GET /submissions?page=N
+CLOCK_SKEW_S = 300
+LOST_AFTER_S = 3600         # `followup`: an upload absent from the history this long after it is lost
+
+
+def classify_verdict(status: str, err: str) -> str:
+    return "SERVER_ERROR" if status == "ERROR" and SERVER_ERROR_RE.search(err or "") else status
+
+
+def find_lost_submission(api: Api, theorem_id: str, sha256: str, started: float,
+                         until: float | None = None) -> tuple[dict | None, str]:
+    """Look for an upload of exactly these bytes (sha256) to `theorem_id` in this account's
+    submission history, created between `started` and `until` (default now), give or take
+    CLOCK_SKEW_S. Returns (row, "") or (None, why); why == "absent" means the history was
+    searched back past `started` and has no such upload. Read-only. Raises on API errors."""
+    lo, hi = started - CLOCK_SKEW_S, (until if until is not None else time.time()) + CLOCK_SKEW_S
+    seen = 0
+    for page in range(1, HISTORY_MAX_PAGES + 1):
+        r = api.get("/submissions", page=page)
+        rows = r.get("submissions") if isinstance(r, dict) else None
+        if not isinstance(rows, list):
+            raise RuntimeError("GET /submissions: unexpected response")
+        if not rows:
+            return None, "absent"
+        older = 0
+        for row in rows:
+            created = _epoch(row.get("created_at"))
+            if created is not None and created < lo:
+                older += 1
+            if row.get("theorem_id") != theorem_id or created is None or not lo <= created <= hi:
+                continue
+            if row.get("status") == "ERROR" and SERVER_ERROR_RE.search(row.get("error_message") or ""):
+                return row, ""  # a storage failure keeps no file to hash; target + time identify it
+            sol = api.get(f"/submissions/{urllib.parse.quote(str(row.get('id')), safe='')}/solution")
+            content = sol.get("content") if isinstance(sol, dict) else None
+            if isinstance(content, str) and hashlib.sha256(content.encode()).hexdigest() == sha256:
+                return row, ""
+        seen += len(rows)
+        total = r.get("total")
+        if (isinstance(total, int) and seen >= total) or older == len(rows):  # newest first
+            return None, "absent"
+    return None, f"history not searched to the end ({HISTORY_MAX_PAGES} pages)"
+
+
+def recover_upload(api: Api, theorem_id: str, sha256: str, started: float) -> tuple[dict | None, str]:
+    """After an upload whose outcome is unknown: find it in the history, retrying a few times
+    (the server may still be processing it). Never submits anything."""
+    why = ""
+    for i in range(RECOVERY_LOOKUPS):
+        if i:
+            time.sleep(RECOVERY_WAIT_S)
+        try:
+            row, why = find_lost_submission(api, theorem_id, sha256, started)
+        except Exception as e:  # noqa: BLE001 - any lookup failure leaves the outcome unknown
+            row, why = None, f"history lookup failed: {e}"[:300]
+        if row:
+            return row, ""
+    return None, why
+
+
+def submission_attempts(events: list[dict]) -> dict[str, dict]:
+    """This run's live uploads, by attempt id: {theorem_id, sha256, outcome}. outcome is
+    "submitted", "refused" (HTTP 4xx: nothing created) or "unknown" (also: started, no outcome
+    logged, e.g. the process was killed mid-upload)."""
+    out: dict[str, dict] = {}
+    for e in events:
+        a = e.get("attempt_id")
+        if not a:
+            continue
+        if e.get("event") == "submit_started":
+            out[a] = {"theorem_id": e.get("theorem_id"), "sha256": e.get("sha256"), "outcome": "unknown"}
+        elif a in out and e.get("event") == "submitted":
+            out[a]["outcome"] = "submitted"
+        elif a in out and e.get("event") == "submit_refused":
+            out[a]["outcome"] = "refused"
+    return out
+
+
+def submissions_used(events: list[dict]) -> int:
+    """Uploads counted against max_submissions_per_run: every upload that was (or may have
+    been) created, i.e. all but those refused outright."""
+    attempts = submission_attempts(events)
+    legacy = sum(1 for e in events if e.get("event") == "submitted" and not e.get("attempt_id"))
+    return legacy + sum(1 for a in attempts.values() if a["outcome"] != "refused")
+
+
+def resubmit_refusal(events: list[dict], theorem_id: str, sha256: str | None = None) -> str | None:
+    """Why this theorem must not be uploaded again in this run, if it must not."""
+    for a in submission_attempts(events).values():
+        if a["theorem_id"] != theorem_id:
+            continue
+        if a["outcome"] == "unknown":
+            return ("an earlier upload of this theorem in this run has an unknown outcome (it may exist "
+                    "on Prove2me); do NOT resubmit this theorem in this run")
+        if sha256 and a["outcome"] == "submitted" and a["sha256"] == sha256:
+            return "this exact proof was already submitted for this theorem in this run"
+    if any(e.get("event") == "result" and e.get("theorem_id") == theorem_id and e.get("status") == "SERVER_ERROR"
+           for e in events):
+        return ("Prove2me failed to store this theorem's submission earlier in this run (SERVER_ERROR); "
+                "not retrying in this run, a later run may")
+    if sha256 and any(e.get("event") == "submitted" and not e.get("attempt_id") and e.get("theorem_id") == theorem_id
+                      and e.get("sha256") == sha256 for e in events):
+        return "this exact proof was already submitted for this theorem in this run"
+    return None
+
+
 def cmd_submit(api: Api, cfg: dict, args) -> None:
     sol = Path(args.file)
     if args.proof_type == "disprove" and not cfg["allow_disproofs"]:
         die("disproofs are disabled in autoprover.config.json")
-    submitted = [e for e in ledger() if e.get("event") == "submitted"]
-    if not cfg["dry_run"] and len(submitted) >= cfg["max_submissions_per_run"]:
-        die(f"max_submissions_per_run ({cfg['max_submissions_per_run']}) reached", 5)
+    events = ledger()
+    if not cfg["dry_run"]:
+        if submissions_used(events) >= cfg["max_submissions_per_run"]:
+            die(f"max_submissions_per_run ({cfg['max_submissions_per_run']}) reached", 5)
+        why = resubmit_refusal(events, args.theorem_id)
+        if why:
+            die(why, 10)
     require_usage(cfg, "submit", 0)  # always a fresh probe, dry run included
     add_tool_notice(sol)  # always, not configurable (README: "Proofs are submitted")
     # Re-run every gate on the exact bytes we are about to send.
     res = gate(api, cfg, args.theorem_id, sol, args.proof_type)
+    if res.get("stale"):
+        refuse_stale(res, "submit")
     if not res["ok"]:
         ledger_append({"event": "check", **{k: v for k, v in res.items() if k != "build_log"}})
         print(json.dumps(res, indent=2, ensure_ascii=False))
@@ -1402,21 +1617,127 @@ def cmd_submit(api: Api, cfg: dict, args) -> None:
     data = sol.read_bytes()
     if hashlib.sha256(data).hexdigest() != res["sha256"]:
         die("solution file changed after the gates ran; not submitting", 2)
+    events = ledger()  # re-read: the gates took a while
+    if submissions_used(events) >= cfg["max_submissions_per_run"]:
+        die(f"max_submissions_per_run ({cfg['max_submissions_per_run']}) reached", 5)
+    why = resubmit_refusal(events, args.theorem_id, res["sha256"])
+    if why:
+        die(why, 10)
     form = {"theorem_id": args.theorem_id, "proof_type": args.proof_type, "file": ("solution.lean", data)}
     if explanation.strip():
         form["explanation"] = explanation
-    # Never retry the upload: a timeout may still have created the submission.
-    r = api._http("POST", "/verify", form=form, retry=False)
-    sid = r["submission_id"]
-    ledger_append({"event": "submitted", **base, "submission_id": sid})
-    status, err = "PENDING", ""
+    started = time.time()
+    base = {**base, "attempt_id": uuid.uuid4().hex[:16], "started_at": now()}
+    # Logged before the upload, so a crash mid-upload still counts against the cap and
+    # blocks a second upload of this theorem in this run.
+    ledger_append({"event": "submit_started", **base})
+    # The upload is sent exactly once: never retried, and recovery below only reads.
+    status, err, recovered = "PENDING", "", False
+    try:
+        r = api._http("POST", "/verify", form=form, retry=False)
+        sid = r.get("submission_id") if isinstance(r, dict) else None
+        if not isinstance(sid, str) or not sid.strip():
+            raise RuntimeError(f"POST /verify: response has no submission_id: {str(r)[:200]}")
+    except ApiError as e:
+        if e.code is not None and 400 <= e.code < 500 and e.code not in (408, 409):
+            ledger_append({"event": "submit_refused", **base, "error": str(e)[:1000]})  # nothing was created
+            raise
+        upload_error = str(e)
+        sid = None
+    except Exception as e:  # noqa: BLE001 - e.g. an unreadable 200 response: the upload may exist
+        upload_error = f"{type(e).__name__}: {e}"
+        sid = None
+    if sid is None:
+        row, why = recover_upload(api, args.theorem_id, res["sha256"], started)
+        if row is None:
+            msg = (f"upload outcome unknown ({upload_error[:300]}); looking it up in the account's history "
+                   f"did not settle it ({why}). It counts against max_submissions_per_run. Do NOT resubmit "
+                   "this theorem in this run; `p2m followup` in a later run resolves it")
+            ledger_append({"event": "result", **base, "status": "SUBMISSION_UNKNOWN", "error": msg[:2000]})
+            print(json.dumps({**base, "status": "SUBMISSION_UNKNOWN", "error_message": msg}, indent=2))
+            die(msg, 10)
+        sid, recovered = row["id"], True
+        status, err = row.get("status") or "PENDING", row.get("error_message") or ""
+        print(f"note: the upload reported an error ({upload_error[:200]}) but reached Prove2me as "
+              f"submission {sid}", file=sys.stderr)
+    ledger_append({"event": "submitted", **base, "submission_id": sid, **({"recovered": True} if recovered else {})})
     deadline = time.time() + args.poll_minutes * 60
     while status == "PENDING" and time.time() < deadline:
         time.sleep(15)
-        v = api.get("/verify", submission_id=sid)
-        status, err = v["status"], v.get("error_message", "")
-    ledger_append({"event": "result", **base, "submission_id": sid, "status": status, "error": err[:2000]})
-    print(json.dumps({**base, "submission_id": sid, "status": status, "error_message": err[:4000]}, indent=2))
+        try:
+            v = api.get("/verify", submission_id=sid)
+        except RuntimeError as e:  # the verdict is still pending as far as we know; `followup` gets it later
+            err = f"polling failed: {e}"
+            break
+        status, err = v["status"], v.get("error_message") or ""
+    final = classify_verdict(status, err)
+    extra = {"server_status": status} if final != status else {}
+    ledger_append({"event": "result", **base, "submission_id": sid, "status": final, "error": err[:2000], **extra})
+    print(json.dumps({**base, "submission_id": sid, "status": final, "error_message": err[:4000], **extra}, indent=2))
+
+
+FOLLOWUP_MAX_LOOKUPS = 20
+FOLLOWUP_MAX_AGE_DAYS = 60
+
+
+def _attempt_key(e: dict):
+    return e.get("attempt_id") or e.get("submission_id")
+
+
+def cmd_followup(api: Api, cfg: dict, args) -> None:
+    """Final verdicts for earlier runs' submissions still PENDING (or with an unknown upload
+    outcome) in logs/*.jsonl, appended to this run's ledger as `followup` events. Read-only
+    on Prove2me; at most FOLLOWUP_MAX_LOOKUPS submissions, none older than FOLLOWUP_MAX_AGE_DAYS."""
+    latest: dict = {}
+    for e in [*log_events(), *ledger()]:
+        if e.get("event") in ("result", "submitted", "followup") and e.get("theorem_id") and _attempt_key(e):
+            if e.get("status") or _attempt_key(e) not in latest:
+                latest[_attempt_key(e)] = e
+    cutoff = time.time() - FOLLOWUP_MAX_AGE_DAYS * 86400
+
+    def when(e: dict) -> float:
+        return _epoch(e.get("submitted_at") or e.get("started_at") or e.get("time")) or 0
+
+    todo = [e for e in latest.values() if when(e) >= cutoff and (
+        (e.get("status") == "PENDING" and e.get("submission_id"))
+        or (e.get("status") == "SUBMISSION_UNKNOWN" and e.get("sha256") and _epoch(e.get("started_at"))))]
+    todo.sort(key=when, reverse=True)
+    skipped = max(0, len(todo) - FOLLOWUP_MAX_LOOKUPS)
+    report = []
+    for e in todo[:FOLLOWUP_MAX_LOOKUPS]:
+        tid, sid = e["theorem_id"], e.get("submission_id")
+        base = {"theorem_id": tid, "theorem_name": e.get("theorem_name"), "proof_type": e.get("proof_type"),
+                "sha256": e.get("sha256"), "submitted_at": e.get("submitted_at") or e.get("started_at") or e.get("time"),
+                "followup_of": e.get("followup_of") or e.get("_run") or run_id(), "previous_status": e["status"],
+                **({"attempt_id": e["attempt_id"]} if e.get("attempt_id") else {})}
+        try:
+            if sid:
+                v = api.get("/verify", submission_id=sid)
+                status, err = v["status"], v.get("error_message") or ""
+            else:
+                started = _epoch(e["started_at"])
+                row, why = find_lost_submission(api, tid, e["sha256"], started, until=started + LOST_AFTER_S)
+                if row:
+                    sid, status, err = row["id"], row.get("status") or "PENDING", row.get("error_message") or ""
+                elif why == "absent" and time.time() - started > LOST_AFTER_S:
+                    status, err = "SUBMISSION_LOST", "not in the account's submission history: the upload never arrived"
+                else:
+                    report.append({**base, "status": e["status"], "note": f"still unresolved: {why}"})
+                    continue
+        except RuntimeError as x:
+            report.append({**base, "submission_id": sid, "status": e["status"], "note": f"lookup failed: {x}"[:300]})
+            continue
+        final = classify_verdict(status, err)
+        if final == e["status"] and not (sid and not e.get("submission_id")):
+            report.append({**base, "submission_id": sid, "status": final, "note": "no change"})
+            continue
+        ev = {**base, "submission_id": sid, "status": final, "error": err[:2000],
+              **({"server_status": status} if final != status else {})}
+        if not sid:
+            ev.pop("submission_id")
+        ledger_append({"event": "followup", **ev})
+        report.append(ev)
+    print(json.dumps({"followed_up": report, "not_looked_up": skipped}, indent=2, ensure_ascii=False))
 
 
 def cmd_record(api: Api, cfg: dict, args) -> None:
@@ -1718,6 +2039,7 @@ def cmd_summary(api: Api | None, cfg: dict, args) -> None:
         lines.append(f"| {link} | {e['status']} | {e.get('submission_id', '')} | {note} |")
     if not results:
         lines.append("| (none) | | | |")
+    lines += followup_lines(events)
     lines += discussion_lines(events)
     for e in events:
         if e.get("event") == "key_renewed":
@@ -1730,6 +2052,19 @@ def cmd_summary(api: Api | None, cfg: dict, args) -> None:
     text = notify_text(events, cfg, rid, args.stop_reason, args.needs_user)
     (STATE / "notify.txt").write_text(text or "")
     print(f"NOTIFY: {text or 'NONE'}")
+
+
+def followup_lines(events: list[dict]) -> list[str]:
+    """Summary section for earlier runs' submissions whose verdict `followup` found."""
+    out = []
+    for e in events:
+        if e.get("event") != "followup":
+            continue
+        thm = f"[{e.get('theorem_name') or e['theorem_id']}](https://prove2.me/theorems/{e['theorem_id']})"
+        note = (e.get("error") or "").replace("\n", " ")[:150]
+        out.append(f"- {thm} (submission {e.get('submission_id', 'unknown')}, run {e.get('followup_of')}): "
+                   f"{e.get('previous_status')} -> **{e.get('status')}**" + (f": {note}" if note else ""))
+    return ["", "## Earlier submissions followed up", "", *out] if out else []
 
 
 def discussion_lines(events: list[dict]) -> list[str]:
@@ -1757,7 +2092,7 @@ def discussion_lines(events: list[dict]) -> list[str]:
 
 NOTIFY_LEVELS = ("important", "every_run", "off")
 ACCEPTED = {"ACCEPTED", "SKETCH_ACCEPTED"}
-NOT_SUBMITTED = {"DRY_RUN_PASSED_LOCAL_CHECKS", "GAVE_UP", "OUT_OF_TIME", "USAGE_LIMIT", "SKIPPED"}
+NOT_SUBMITTED = {"DRY_RUN_PASSED_LOCAL_CHECKS", "GAVE_UP", "OUT_OF_TIME", "USAGE_LIMIT", "SKIPPED", "TARGET_CHANGED"}
 # Stop reasons that the routine prompt uses for problems only the user can fix.
 NEEDS_USER_PATTERNS = (("credential", "Prove2me API key missing or rejected; mint a new key on prove2.me "
                         "and update PROVE2ME_CREDENTIALS"),
@@ -1820,7 +2155,11 @@ def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
     # What was submitted (or, in dry run, would have been).
     accepted = [e["theorem_name"] for e in results if e.get("status") in ACCEPTED]
     pending = [e for e in results if e.get("status") == "PENDING"]
-    rejected = [e for e in results if e.get("submission_id") and e.get("status") not in ACCEPTED | {"PENDING"}]
+    server = [e for e in results if e.get("status") == "SERVER_ERROR"]
+    unknown = [e for e in results if e.get("status") == "SUBMISSION_UNKNOWN"]
+    rejected = [e for e in results if e.get("submission_id")
+                and e.get("status") not in ACCEPTED | {"PENDING", "SERVER_ERROR"}]
+    followed = [e for e in events if e.get("event") == "followup"]
     dry = [e["theorem_name"] for e in results if e.get("status") == "DRY_RUN_PASSED_LOCAL_CHECKS"]
     parts = []
     if accepted:
@@ -1830,6 +2169,15 @@ def notify_text(events: list[dict], cfg: dict, rid: str, stop_reason: str = "",
         parts.append(f"{len(rejected)} rejected ({verdicts})")
     if pending:
         parts.append(f"{len(pending)} still pending")
+    if server:
+        parts.append(f"{len(server)} hit a Prove2me server error (a later run may retry)")
+    if unknown:
+        parts.append(f"{len(unknown)} upload(s) with unknown outcome")
+    if followed:
+        done = [e.get("theorem_name") or e["theorem_id"] for e in followed if e.get("status") in ACCEPTED]
+        rest = sorted({e.get("status", "?") for e in followed if e.get("status") not in ACCEPTED})
+        parts.append(f"earlier submissions resolved: {len(done)} accepted"
+                     + (f" ({', '.join(done)})" if done else "") + (f", others {', '.join(rest)}" if rest else ""))
     if dry:
         parts.append(f"{len(dry)} passed local checks in dry run ({', '.join(dry)})")
     posted = [e for e in events if e.get("event") == "comment_posted"]
@@ -1893,8 +2241,23 @@ def cmd_notify(api: Api | None, cfg: dict, args) -> None:
               f"{str(reason).replace(url, '<webhook>')[:200]}); notification not delivered", file=sys.stderr)
 
 
+EXIT_CODES = """exit codes:
+  0  ok                       1  error (see the message)
+  2  local gates failed       3  Prove2me credentials missing or rejected
+  4  too many platform imports: skip this claim
+  5  max_submissions_per_run reached
+  6  usage no-go (stop the run as for a usage limit)
+  7  usage unknown
+  8  renew-key --strict failed
+  9  check/submit: the target is no longer submittable (not Open, deprecated, or its statement
+     or environment changed since `fetch`); already recorded as TARGET_CHANGED, move on
+  10 submit: do not upload this theorem again in this run (an earlier upload's outcome is
+     unknown, Prove2me failed to store it, or this exact proof was already submitted)"""
+
+
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(description=__doc__, epilog=EXIT_CODES,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status", help="check credentials, versions, env pin, mode")
     s = sub.add_parser("pin-env", help="write lean-toolchain/lakefile.lean for an environment")
@@ -1916,14 +2279,16 @@ def main() -> None:
     s = sub.add_parser("solution", help="print the Lean source of an existing submission (read-only)")
     s.add_argument("submission_id")
     for name in ("check", "submit"):
-        s = sub.add_parser(name, help="usage checkpoint, then local gates" if name == "check"
-                           else "usage checkpoint, gates, then submit (or dry-run); exit 6 = usage no-go")
+        s = sub.add_parser(name, help="usage checkpoint, then local gates; exit 9 = target changed"
+                           if name == "check" else "usage checkpoint, gates, then submit (or dry-run); "
+                           "exit 6 = usage no-go, 9 = target changed, 10 = do not resubmit this theorem")
         s.add_argument("theorem_id")
         s.add_argument("file")
         s.add_argument("--proof-type", choices=["prove", "disprove"], default="prove")
         if name == "submit":
             s.add_argument("--explanation-file")
             s.add_argument("--poll-minutes", type=int, default=20)
+    sub.add_parser("followup", help="look up final verdicts of earlier runs' pending submissions (read-only)")
     s = sub.add_parser("record", help="record a claim abandoned without submitting")
     s.add_argument("theorem_id")
     s.add_argument("theorem_name")

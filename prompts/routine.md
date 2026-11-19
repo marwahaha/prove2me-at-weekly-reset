@@ -80,6 +80,9 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    overrides shown by `status` win).
 4. Earlier runs' logs are already in `logs/` (this repo); `candidates` skips the claims they
    attempted.
+5. `p2m followup > .autoprover/followup.json; echo $?`. Read-only: it fetches the final verdict
+   of earlier submissions that were still pending or whose upload outcome was unknown, and
+   records it for this run's summary. Just let it run; whatever it prints, carry on.
 5. Skim `$WS/references/prove.md` (sections "Attach an explanation", "Reductions", "Key rules
    for reductions") once; it defines the explanation style and the sketch rules used below.
 
@@ -120,7 +123,10 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
    start it: `p2m record ... --status SKIPPED --note "claimed in discussion by <user>"`.
 2. Understand the claim: read the formal statement carefully (hypotheses, types, coercions, edge
    cases such as `n = 0` or empty sets). Check the formal statement says what the NL statement
-   says; if they differ, prove the formal one. Read previous failed submissions' errors and do
+   says; if they differ, prove the formal one. Before committing to a proof, spend a few minutes
+   testing whether the statement could be false (small cases, boundary values, truncated
+   subtraction or division on `ℕ`): a formalization slip makes a disproof the right answer.
+   Never prove a stronger or different statement than the one given. Read previous failed submissions' errors and do
    not repeat their approach. To read an earlier attempt's Lean source, run
    `p2m solution <submission_id>` with an id from `previous_submissions` (read-only).
 3. Find the source: web-search the cited paper/book and fetch it (arXiv abstract/PDF, etc.).
@@ -160,7 +166,9 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
      (background + poll; it runs `lake build`, the sorry/axiom check and the type-match check).
      Exit 0 means `ok: true`. On failure read `problems` and `build_log`, fix, repeat. Exit 6
      means the usage checkpoint said no-go (nothing was built): record the claim as
-     USAGE_LIMIT and stop as in hard rule 5.
+     USAGE_LIMIT and stop as in hard rule 5. Exit 9 means the target is no longer submittable
+     (closed, deprecated or changed since `fetch`): it is already recorded as TARGET_CHANGED;
+     do not `record` it, drop the claim and move to the next one.
    - If `type_match` reports "unchecked", compare your `solution` signature to the target file
      line by line before submitting.
    - Tactics worth trying: `simp`, `simp_all`, `omega`, `linarith`, `nlinarith [sq_nonneg ...]`,
@@ -180,7 +188,13 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
      respects `dry_run` and the submission cap, and polls the verdict). Exit 5 = cap reached:
      stop submitting. Exit 6 = usage no-go, nothing sent: `p2m record <theorem_id>
      <theorem_name> --status USAGE_LIMIT --note "passed local checks; <reason>"`, then steps 3
-     to 5 with that reason. A result of `DRY_RUN` or a server verdict ends the claim.
+     to 5 with that reason. Exit 9 = target no longer submittable: as for `check`. Exit 10 =
+     do not upload this theorem again in this run (an earlier upload's outcome is unknown, it
+     hit a server error, or this exact proof was already sent). It is already recorded and, if
+     unknown, counted as a submission: never resubmit "to be safe"; move to the next claim; a
+     later run's `followup` settles it. A result of `DRY_RUN` or a server verdict ends the claim.
+   - A `SERVER_ERROR` result is a Prove2me infrastructure fault, not a proof failure: do not
+     debug or resubmit the proof and do not post a dead-end note. A later run may retry it.
    - On `CE`/`WA`/`FAILED` with time left, you may fix and resubmit once; otherwise record.
 8. Giving up (no proof, out of time, statement looks ill-posed, too many imports, exit 4 from
    `fetch`/`mirror`): if it is GAVE_UP or OUT_OF_TIME after real Lean work and `discussion`
@@ -189,9 +203,13 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
    Mathlib gap, if identified>"] [--source "<reference used>"] [--submission <failed id>]`.
    Concise facts only: no speculation, no mention of yourself. It posts only if its own rules
    pass (otherwise it prints why and exits 0; never retry or rephrase to get past them). Then
-   `p2m record <theorem_id> <theorem_name> --status GAVE_UP|OUT_OF_TIME|SKIPPED --note "<one
-   line useful next time: what you tried, where it got stuck, the source used>"`. Every claim
-   you started must end with a `submit` result or a `record`.
+   `p2m record <theorem_id> <theorem_name> --status GAVE_UP|OUT_OF_TIME|SKIPPED --note "<note>"`.
+   For GAVE_UP and OUT_OF_TIME after real work, the note is a hand-off to the next run that
+   tries this claim (it reads it back with `grep <theorem_id> logs/*.jsonl`), in four short
+   labelled parts on one line: `Remaining: <what is still unproved, as precisely as possible>.
+   Done: <lemmas or steps that compiled, and where the code is if saved>. Failed: <routes tried
+   and why each failed>. Next: <the most promising next step and source>.` For SKIPPED, one
+   line with the reason. Every claim you started must end with a `submit` result or a `record`.
 
 Then move to the next claim. Stop after `max_claims_per_run` claims.
 

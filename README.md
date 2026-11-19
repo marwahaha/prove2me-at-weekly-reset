@@ -14,7 +14,7 @@ This tool assumes you have all three of these accounts:
 
 Nothing needs to be installed on your computer.
 
-> **Status: early.** The maintainer is testing it on their own account first. Routines are a research-preview feature of Claude Code, so details can change. Issues and pull requests are welcome.
+> **Status: alpha.** Experimental and not production-ready: behavior and setup may change without notice. Use at your own risk. Runs use your Claude allowance and, once you go live, submit proofs publicly under your Prove2me account. Start in dry run (the default) and read a few logs first. Provided "as is" under the [Apache 2.0 license](LICENSE). Routines are a research-preview feature of Claude Code, so details can change. Issues and pull requests are welcome.
 
 > [!WARNING]
 > **Paid extra usage.** If "extra usage" / usage credits are enabled on your Claude account or organization, a run can continue on metered overage after your subscription allowance runs out, **and you will be charged**. Every run checks your usage before it starts, before each claim, before each local build and before each submission, and stops if the account is on paid overage or above the caps (see *Usage gate* below). That check is a strong safeguard but not a guarantee: usage can still overshoot between two checks. Turn extra usage off at [claude.ai/settings/usage](https://claude.ai/settings/usage) before enabling live runs. On Team and Enterprise plans, an admin does this at claude.ai/admin-settings/usage.
