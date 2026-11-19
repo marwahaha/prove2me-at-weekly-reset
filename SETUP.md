@@ -23,7 +23,7 @@ Setup assumes you have all three of these accounts:
 
 Nothing needs to be installed on your computer.
 
-If one is missing, create it first; Claude cannot create these accounts for you.
+If one is missing, step 0 walks you through creating it. Claude cannot create accounts for you, but it tells you exactly what to click.
 
 ## Instructions for Claude
 
@@ -35,7 +35,7 @@ Read this whole file before starting. Then:
   - what they need: their Claude subscription, a Prove2me account and a GitHub account (the free plan is enough);
   - that nothing is submitted under their name until they decide to go live at the end.
 
-  For example: "I'll help you set up prove2me-at-weekly-reset. Once a week, just before your weekly Claude limit resets, it uses the allowance you have left to try to prove open theorems on Prove2me. Setup takes about 20 minutes: you'll do a few things in your browser, and I'll walk you through each one and do the rest. You'll need your Prove2me account and a GitHub account (a free one is fine). Nothing is submitted under your name until you decide to go live at the end. Let's start."
+  For example: "I'll help you set up prove2me-at-weekly-reset. Once a week, just before your weekly Claude limit resets, it uses the allowance you have left to try to prove open theorems on Prove2me. Setup takes about 20 minutes: you'll do a few things in your browser, and I'll walk you through each one and do the rest. You'll need a Prove2me account and a GitHub account (a free one is fine); if you don't have one yet, I'll help you create it. Nothing is submitted under your name until you decide to go live at the end. Let's start."
 
 - **Never ask for, read, print or store the Prove2me API key.** The user pastes it into the cloud environment themselves. If the user pastes it into chat anyway, do not repeat it, and tell them to mint a new one, since the chat now holds it.
 - Do the **[Claude]** steps yourself. For a **[You]** step, give the user the exact clicks and the ready-to-paste values from this file, then wait until they say it is done and run the step's Check.
@@ -54,7 +54,15 @@ Read this whole file before starting. Then:
   - Why GitHub: each cloud run starts on an empty machine, so anything that must last between runs lives in your private data repo (step 3): your settings, the run logs (which also let runs skip theorems already tried) and the renewed Prove2me key, encrypted. The tool's own code also comes from GitHub, at its newest release.
 - Nothing to install. If the [`gh` CLI](https://cli.github.com) happens to be installed and signed in, Claude uses it to create your data repo; otherwise you create it in the browser in step 3 (about two minutes).
 
+**Missing an account? [You, with Claude's help]** Claude: ask the user, in one question, which of the three accounts they already have. For each missing one, walk them through creating it, one at a time, and wait until they say it's done. Never type their email, password or username yourself.
+
+- **Claude subscription:** at [claude.ai/upgrade](https://claude.ai/upgrade), choose Pro or higher. (The free plan has no Claude Code on the web.)
+- **Prove2me:** at [prove2.me](https://prove2.me), click **Log in** (top right), then the **Register** tab. Fill in email, password and a username, and click **Create Account**. The username is public: proofs and comments appear under it. As the form says, public contributions are licensed under Apache 2.0, and you keep your copyright.
+- **GitHub:** at [github.com/signup](https://github.com/signup), create a free account (email, password, username; GitHub then emails a code to confirm the address). No paid plan is needed.
+- **Connect GitHub to Claude Code on the web**, needed even with an existing GitHub account if it was never connected: open [claude.ai/code](https://claude.ai/code). If it offers to connect GitHub, accept and authorize the **Claude GitHub App**. When GitHub asks where to install it, the simplest is **All repositories**; with **Only select repositories**, the new data repo must be added in step 3. (Alternative for people who use the `gh` CLI: run `/web-setup` in Claude Code in a terminal.)
+
 **Check [Claude]:**
+- The user confirms they can sign in to prove2.me and that claude.ai/code shows their GitHub repositories (or lets them pick a repository).
 - Run `gh auth status`. If it succeeds, step 3 uses the `gh` path; if `gh` is missing or not signed in, it uses the browser path. Do not install `gh` or ask the user to; just say which path step 3 will take.
 - Get a copy of this repo to work from: `gh repo clone sattath/prove2me-at-weekly-reset`, or `git clone https://github.com/sattath/prove2me-at-weekly-reset`, or download and unpack <https://github.com/sattath/prove2me-at-weekly-reset/archive/refs/heads/main.zip>. Below, `<tool clone>` is that folder.
 
@@ -102,6 +110,8 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 **Check:**
 - `gh` path: `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON. Right after the first push GitHub may still report no default branch; wait 10 seconds and check again (that does not count as a failed Check).
 - Browser path: `curl -s -o /dev/null -w '%{http_code}' https://github.com/<owner>/<name>` prints `404` (a public repo would give `200`; this is how you know it is private without signing in), and the user confirms that the repo's page lists `autoprover.config.json`.
+
+**GitHub App on selected repositories only:** if the user installed the Claude GitHub App for selected repositories (step 0), add the new data repo now: [github.com/apps/claude](https://github.com/apps/claude), **Configure**, pick the account, add `<name>` under **Only select repositories**, **Save**. Otherwise runs cannot clone it. While the tool repo is private, it must be reachable too.
 
 **Browser path, later steps:** you cannot push to or read the private data repo. Where steps 6 and 7 say to change `autoprover.config.json` and push, give the user the exact edit instead: open the file on GitHub, click the pencil icon, change that one line, click **Commit changes**. Where they say to read a log in the data repo, ask the user to open it and paste its text, or read the run's own output through the routine tool.
 
