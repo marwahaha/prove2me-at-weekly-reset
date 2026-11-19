@@ -111,7 +111,7 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 - `gh` path: `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON. Right after the first push GitHub may still report no default branch; wait 10 seconds and check again (that does not count as a failed Check).
 - Browser path: `curl -s -o /dev/null -w '%{http_code}' https://github.com/<owner>/<name>` prints `404` (a public repo would give `200`; this is how you know it is private without signing in), and the user confirms that the repo's page lists `autoprover.config.json`.
 
-**GitHub App on selected repositories only:** if the user installed the Claude GitHub App for selected repositories (step 0), add the new data repo now: [github.com/apps/claude](https://github.com/apps/claude), **Configure**, pick the account, add `<name>` under **Only select repositories**, **Save**. Otherwise runs cannot clone it. While the tool repo is private, it must be reachable too.
+**GitHub App on selected repositories only:** if the user installed the Claude GitHub App for selected repositories (step 0), add the new data repo now: [github.com/apps/claude](https://github.com/apps/claude), **Configure**, pick the account, add `<name>` under **Only select repositories**, **Save**. Otherwise runs cannot clone it. (The tool repo is public, so it needs no access.)
 
 **Browser path, later steps:** you cannot push to or read the private data repo. Where steps 6 and 7 say to change `autoprover.config.json` and push, give the user the exact edit instead: open the file on GitHub, click the pencil icon, change that one line, click **Commit changes**. Where they say to read a log in the data repo, ask the user to open it and paste its text, or read the run's own output through the routine tool.
 
@@ -164,7 +164,7 @@ Settings:
 
 - **Name:** `prove2me-at-weekly-reset`.
 - **Repositories:** your private data repo and this tool repo, nothing else. The routine clones both; logs are pushed only to the data repo.
-  - While this repo is private, attaching it is the only way a run can get the tool. Once it is public, the plan is to attach only the data repo and have each run download the tool at a pinned version with [`scripts/bootstrap.sh`](scripts/bootstrap.sh) (variable `AUTOPROVER_REF`).
+  - The tool repo is public, so any account can attach it. Each run checks out its newest release tag, never `main` (see *Afterwards*).
 - **Environment:** the one from step 4.
 - **Prompt:** the whole of [`prompts/routine-trigger.md`](prompts/routine-trigger.md). It locates both clones and hands over to the full instructions in [`prompts/routine.md`](prompts/routine.md), which runs read fresh from GitHub each time.
 - **Model:** default `opus`. Offer the user the options:
