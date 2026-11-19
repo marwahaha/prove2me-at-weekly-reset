@@ -2,6 +2,8 @@
 
 A community tool for people who have both a Claude subscription and a [Prove2me](https://prove2.me) account. It uses the part of your weekly Claude allowance that would otherwise go unused. In the last hours before your weekly limit resets, a scheduled cloud agent attempts proofs of open Lean 4 theorems on Prove2me, and submits only the proofs that pass strict local checks.
 
+The idea is borrowed from volunteer computing projects such as SETI@home and Folding@home, which put idle home computers to work on science. Here the spare resource is the unused part of your weekly Claude allowance, and the work is formal mathematics. Hence the name: prove2me *at weekly reset*, in the spirit of *@home*.
+
 Everything runs in the cloud, as a [Claude Code routine](https://code.claude.com/docs/en/routines). No local machine is involved and nobody needs to watch it.
 
 ## Requirements
@@ -121,9 +123,9 @@ Prove2me API keys expire after 30 days, but you paste one only once. Every run, 
 - **Pinned environment.** Prove2me checks every theorem against one exact Mathlib commit and Lean version. The cloud machine installs exactly that pair: elan installs Lean, and `lake exe cache get` downloads about 5 GB of precompiled Mathlib. That download saves hours of compilation.
 - **Mirrored definitions.** Most theorems on Prove2me import platform definitions. The helper copies those files into the local `Definitions/` and `Theorems/` folders, so a local build behaves exactly like the server's.
 
-## Setup (about 20 minutes)
+## Setup (about 10 minutes of your time, plus a test run)
 
-Setup is in [SETUP.md](SETUP.md). The easiest way is to let Claude do it: paste this line into Claude Code (the app or the CLI) and answer its questions.
+The test run takes 10 to 45 minutes and runs on its own; you don't need to watch it. Setup is in [SETUP.md](SETUP.md). The easiest way is to let Claude do it: paste this line into Claude Code (the app or the CLI) and answer its questions.
 
 ```
 Set up prove2me-at-weekly-reset for me by following SETUP.md in github.com/sattath/prove2me-at-weekly-reset
