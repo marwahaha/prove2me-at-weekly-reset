@@ -86,10 +86,10 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 
 There is no command or API for creating a cloud environment yet, so this step is in the browser. Claude shows you the values; you paste them.
 
-At [claude.ai/code](https://claude.ai/code), open the environment selector and choose **New environment** (or edit the one you already use for this tool). Fill in:
+At [claude.ai/code](https://claude.ai/code), open the environment selector and choose **New environment** (or edit the one you already use for this tool). **Click-by-click screenshots:** [docs/environment-howto](docs/environment-howto/README.md). Fill in:
 
 - **Name:** `prove2me-at-weekly-reset`.
-- **Network access: Custom.** Tick *Also include default list of common package managers*, and add:
+- **Network access: Limited.** Keep **Allow package managers** ticked, and add these allowed domains:
   ```
   prove2.me
   lakecache.blob.core.windows.net
