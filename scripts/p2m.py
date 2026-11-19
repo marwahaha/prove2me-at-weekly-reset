@@ -756,8 +756,25 @@ def _field_rows(api: Api, sel: dict) -> list[dict]:
     return leaves
 
 
+FIELDS_SNAPSHOT = REPO / "data" / "fields.json"  # refresh: p2m.py fields --live > data/fields.json
+
+
+def _have_prove2me_key() -> bool:
+    return bool(os.environ.get("PROVE2ME_CREDENTIALS") or CREDS.exists() or KEY_FILE.exists())
+
+
 def cmd_fields(api: Api, cfg: dict, args) -> None:
-    """List Prove2me's fields (slug, name, missions, unfinished), most missions first."""
+    """List Prove2me's fields (slug, name, missions, unfinished), most missions first.
+
+    Prove2me's /fields needs a key, which setup never gives Claude, so without one this
+    prints the snapshot shipped in the tool (field names change rarely)."""
+    if not args.live and not _have_prove2me_key():
+        print(f"note: no Prove2me key here; listing the snapshot in {FIELDS_SNAPSHOT.relative_to(REPO)}",
+              file=sys.stderr)
+        rows = json.loads(FIELDS_SNAPSHOT.read_text())
+        q = (args.q or "").lower()
+        print(json.dumps([r for r in rows if q in r["slug"].lower() or q in r["name"].lower()], indent=1))
+        return
     out, offset = [], 0
     while True:
         page = api.get("/fields", sort="popular", limit=200, offset=offset, **({"q": args.q} if args.q else {}))
@@ -1890,6 +1907,7 @@ def main() -> None:
     s.add_argument("--file", help="write it to this private file instead of the clipboard")
     s = sub.add_parser("fields", help="list Prove2me fields to choose from (for selection.fields)")
     s.add_argument("q", nargs="?", help="filter by a word in the name or slug")
+    s.add_argument("--live", action="store_true", help="always ask Prove2me (needs a key), never the snapshot")
     sub.add_parser("candidates", help="ranked shortlist of open claims (JSON)")
     s = sub.add_parser("mirror", help="mirror existing platform theorems/definitions to import in a sketch")
     s.add_argument("names", nargs="+", help="platform names or module names (Theorems.Thm_x)")

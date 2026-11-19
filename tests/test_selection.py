@@ -102,6 +102,22 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual([(r["theorem_id"], r["_source"]) for r in rows], [("s", "saved"), ("f", "field:M1")])
 
 
+class FieldsSnapshotTests(unittest.TestCase):
+    def test_without_a_key_lists_the_snapshot_and_never_calls_the_api(self):
+        import contextlib, io, json, types
+        from unittest import mock
+        m = load_p2m()
+        m.CREDS = m.KEY_FILE = Path(tempfile.mkdtemp()) / "missing"
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=False), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(io.StringIO()):
+            os.environ.pop("PROVE2ME_CREDENTIALS", None)
+            m.cmd_fields(FakeApi([], {}), {}, types.SimpleNamespace(q="QUANTUM", live=False))
+        rows = json.loads(out.getvalue())
+        self.assertIn("quantum-information", [r["slug"] for r in rows])
+        self.assertTrue(all("quantum" in r["slug"] or "quantum" in r["name"].lower() for r in rows))
+
+
 class ToolNoticeTests(unittest.TestCase):
     def test_notice_is_first_line_once_and_imports_still_parse(self):
         m = load_p2m()

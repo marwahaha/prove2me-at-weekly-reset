@@ -29,9 +29,11 @@ Read this whole file before starting. Then:
 - A Claude subscription (Pro, Max, Team or Enterprise) with Claude Code, and access to Claude Code on the web (claude.ai/code).
 - A [Prove2me](https://prove2.me) account.
 - A GitHub account, connected to Claude Code on the web: claude.ai/code must be able to clone your private repositories.
-- For Claude-driven setup: the `gh` CLI, signed in (`gh auth login`).
+- Nothing to install. If the [`gh` CLI](https://cli.github.com) happens to be installed and signed in, Claude uses it to create your data repo; otherwise you create it in the browser in step 3 (about two minutes).
 
-**Check [Claude]:** `gh auth status` succeeds, and `gh repo view sattath/prove2me-at-weekly-reset` works (while the tool repo is private, this needs access to it).
+**Check [Claude]:**
+- Run `gh auth status`. If it succeeds, step 3 uses the `gh` path; if `gh` is missing or not signed in, it uses the browser path. Do not install `gh` or ask the user to; just say which path step 3 will take.
+- Get a copy of this repo to work from: `gh repo clone sattath/prove2me-at-weekly-reset`, or `git clone https://github.com/sattath/prove2me-at-weekly-reset`, or download and unpack <https://github.com/sattath/prove2me-at-weekly-reset/archive/refs/heads/main.zip>. Below, `<tool clone>` is that folder.
 
 ## Step 1. Turn off paid extra usage [You]
 
@@ -56,16 +58,11 @@ On prove2.me, log in, open the account menu and click **API key**. Your secret v
 Your data repo holds your settings (`autoprover.config.json`) and the run logs. It must be **private**.
 
 1. Ask the user for the repo name (default `prove2me-at-weekly-reset-data`) and whether to create it under their GitHub account.
-2. Create it from the files in [`template/`](template/):
-
-   ```bash
-   gh repo create <name> --private --clone
-   cp -R <tool clone>/template/. <name>/
-   ```
-
-   `<tool clone>` is a clone of this repo; make one with `gh repo clone sattath/prove2me-at-weekly-reset` if needed.
+2. Make a local folder `<name>` with the files in [`template/`](template/):
+   - **`gh` path:** `gh repo create <name> --private --clone`, then `cp -R <tool clone>/template/. <name>/`.
+   - **Browser path:** `mkdir <name> && cp -R <tool clone>/template/. <name>/` (nothing on GitHub yet).
 3. Ask the user **only these three choices** for `autoprover.config.json`, one at a time, and write them:
-   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: runs then take open theorems from the whole library, most votes first.
+   - **`selection.fields`:** the user's areas of interest. Run `python3 scripts/p2m.py fields` (or `p2m.py fields quantum` to filter) in the tool clone; it lists Prove2me's fields with their numbers of missions and unfinished missions. (Prove2me's live list needs the API key, which you never have, so it prints the snapshot shipped in the tool. That is expected.) Let the user pick any number of them from a clickable multi-select (in the Claude app, an interactive form grouped by area, each field with its number of unfinished missions; in a plain terminal, a numbered list), never a wall of text, and write the slugs, e.g. `["quantum-information", "theoretical-computer-science"]`. An empty list means no preference: runs then take open theorems from the whole library, most votes first.
    - **`notify`:** when to send a notification: `important` (default), `every_run` or `off`. See *Notifications* in the README.
    - **`discussion`:** `"off"` (default) or `"deadends"` to let runs post short dead-end notes in mission discussions, at most `max_comments_per_run` (default 2) per run. See *Discussions* in the README.
 
@@ -73,9 +70,17 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
    - `dry_run` stays `true` (step 7 switches to live) and `test_run` stays `false` (step 6 sets it briefly).
    - The rest of `selection` stays as is. Mention in one sentence that theorems the user saves on prove2.me are always tried first, before the fields. (For reference: `sources` runs saved theorems, then `mission_ids`, then the fields' unfinished missions, at most `missions_per_run` per run, highest closability first, and only without fields a whole-library search by votes; the filters are `max_statement_chars`, `skip_flagged` and `skip_attempted_by_me`.)
    - The usage-gate keys stay at their defaults (`lead_hours` 2, the caps and margins; see *Usage gate* in the README), unless the user brings them up.
-4. Commit and push to the default branch.
+4. Put the files on GitHub:
+   - **`gh` path:** commit and push to the default branch.
+   - **Browser path [You]:** give the user these steps, with the folder's full path:
+     1. Open [github.com/new](https://github.com/new). Repository name: `<name>`. Choose **Private**. Leave everything else as it is, and click **Create repository**.
+     2. On the new repo's page, click **uploading an existing file**. Drag `autoprover.config.json` and `README.md` from the folder `<full path>` onto the page, then click **Commit changes**. (`.gitignore` can stay behind; runs never need it.)
 
-**Check:** `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON.
+**Check:**
+- `gh` path: `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON.
+- Browser path: `curl -s -o /dev/null -w '%{http_code}' https://github.com/<owner>/<name>` prints `404` (a public repo would give `200`; this is how you know it is private without signing in), and the user confirms that the repo's page lists `autoprover.config.json`.
+
+**Browser path, later steps:** you cannot push to or read the private data repo. Where steps 6 and 7 say to change `autoprover.config.json` and push, give the user the exact edit instead: open the file on GitHub, click the pencil icon, change that one line, click **Commit changes**. Where they say to read a log in the data repo, ask the user to open it and paste its text, or read the run's own output through the routine tool.
 
 ## Step 4. Cloud environment [You]
 
@@ -184,4 +189,4 @@ After reading a few dry-run logs (scheduled runs write one every week), the user
 - **Key renewal is automatic.** Each run renews the Prove2me key, so it stays valid for 30 days after the last run. Never delete the encryption password from the environment: `PROVE2ME_CREDENTIALS` (your first key), or `AUTOPROVER_ENCRYPTION_SECRET` if you added one. You need to paste a new key (steps 2 and 4) only if a run notifies you that renewal failed repeatedly, or that the key was rejected because no run renewed it for about 4 weeks.
 - **Debugging:** ask Claude Code to list the routine's runs and read a run's log; it can do this without opening claude.ai.
 - **Updates:** each run clones the tool fresh from GitHub and runs its **newest release tag** (`vYYYY.MM.DD`), not `main`. Runs can push branches but never tags (Anthropic's GitHub proxy rejects tag pushes), so code a misled run pushes is never executed by a later run. New releases reach you automatically. Only the two pasted copies do not update by themselves: the routine's prompt (step 5) and the environment's setup script (step 4). When the tool's changelog or README says one of them changed, paste it again, or ask Claude to update the routine's prompt.
-- **Releasing (maintainers):** after pushing to `main`, tag the release: `git tag v$(date -u +%Y.%m.%d) && git push origin --tags` (add `.2`, `.3` for a second release the same day). Until a tag is pushed, runs keep using the previous release.
+- **Releasing (maintainers):** after pushing to `main`, tag the release: `git tag v$(date -u +%Y.%m.%d) && git push origin --tags` (add `.2`, `.3` for a second release the same day). Until a tag is pushed, runs keep using the previous release. Now and then, refresh the field list that setup shows: `python3 scripts/p2m.py fields --live > data/fields.json` (needs a Prove2me key).

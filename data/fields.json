@@ -1,0 +1,458 @@
+[
+ {
+  "slug": "operations-research",
+  "name": "Operations Research",
+  "missions": 3614,
+  "unfinished": 989
+ },
+ {
+  "slug": "probability",
+  "name": "Probability",
+  "missions": 2740,
+  "unfinished": 1216
+ },
+ {
+  "slug": "optimization",
+  "name": "Optimization",
+  "missions": 2311,
+  "unfinished": 593
+ },
+ {
+  "slug": "theoretical-computer-science",
+  "name": "Theoretical Computer Science",
+  "missions": 1438,
+  "unfinished": 864
+ },
+ {
+  "slug": "quantum-information",
+  "name": "Quantum Information",
+  "missions": 1400,
+  "unfinished": 1005
+ },
+ {
+  "slug": "combinatorics",
+  "name": "Combinatorics",
+  "missions": 1228,
+  "unfinished": 551
+ },
+ {
+  "slug": "machine-learning",
+  "name": "Machine Learning",
+  "missions": 886,
+  "unfinished": 365
+ },
+ {
+  "slug": "algorithmic-game-theory",
+  "name": "Algorithmic Game Theory",
+  "missions": 848,
+  "unfinished": 323
+ },
+ {
+  "slug": "convex-optimization",
+  "name": "Convex Optimization",
+  "missions": 746,
+  "unfinished": 178
+ },
+ {
+  "slug": "graph-theory",
+  "name": "Graph Theory",
+  "missions": 697,
+  "unfinished": 396
+ },
+ {
+  "slug": "stochastic-systems",
+  "name": "Stochastic Systems",
+  "missions": 633,
+  "unfinished": 308
+ },
+ {
+  "slug": "statistics",
+  "name": "Statistics",
+  "missions": 597,
+  "unfinished": 250
+ },
+ {
+  "slug": "complexity-theory",
+  "name": "Complexity Theory",
+  "missions": 570,
+  "unfinished": 414
+ },
+ {
+  "slug": "economics",
+  "name": "Economics",
+  "missions": 523,
+  "unfinished": 124
+ },
+ {
+  "slug": "linear-optimization",
+  "name": "Linear Optimization",
+  "missions": 468,
+  "unfinished": 102
+ },
+ {
+  "slug": "analysis",
+  "name": "Analysis",
+  "missions": 365,
+  "unfinished": 95
+ },
+ {
+  "slug": "mathematical-physics",
+  "name": "Mathematical Physics",
+  "missions": 360,
+  "unfinished": 94
+ },
+ {
+  "slug": "dynamic-programming",
+  "name": "Dynamic Programming",
+  "missions": 347,
+  "unfinished": 99
+ },
+ {
+  "slug": "linear-algebra",
+  "name": "Linear algebra",
+  "missions": 329,
+  "unfinished": 128
+ },
+ {
+  "slug": "functional-analysis",
+  "name": "Functional Analysis",
+  "missions": 303,
+  "unfinished": 85
+ },
+ {
+  "slug": "markov-chain",
+  "name": "Markov Chain",
+  "missions": 295,
+  "unfinished": 112
+ },
+ {
+  "slug": "mechanism-design",
+  "name": "Mechanism Design",
+  "missions": 269,
+  "unfinished": 114
+ },
+ {
+  "slug": "information-theory",
+  "name": "Information Theory",
+  "missions": 267,
+  "unfinished": 183
+ },
+ {
+  "slug": "numerical-analysis",
+  "name": "Numerical Analysis",
+  "missions": 254,
+  "unfinished": 74
+ },
+ {
+  "slug": "number-theory",
+  "name": "Number Theory",
+  "missions": 237,
+  "unfinished": 92
+ },
+ {
+  "slug": "bandit-algorithms",
+  "name": "Bandit Algorithms",
+  "missions": 215,
+  "unfinished": 93
+ },
+ {
+  "slug": "control-theory",
+  "name": "Control Theory",
+  "missions": 214,
+  "unfinished": 127
+ },
+ {
+  "slug": "discrete-geometry",
+  "name": "Discrete Geometry",
+  "missions": 190,
+  "unfinished": 55
+ },
+ {
+  "slug": "dynamical-systems",
+  "name": "Dynamical Systems",
+  "missions": 180,
+  "unfinished": 66
+ },
+ {
+  "slug": "algebra",
+  "name": "Algebra",
+  "missions": 174,
+  "unfinished": 83
+ },
+ {
+  "slug": "reinforcement-learning",
+  "name": "Reinforcement Learning",
+  "missions": 138,
+  "unfinished": 57
+ },
+ {
+  "slug": "computational-complexity",
+  "name": "Computational Complexity",
+  "missions": 136,
+  "unfinished": 130
+ },
+ {
+  "slug": "actuarial-science",
+  "name": "Actuarial Science",
+  "missions": 114,
+  "unfinished": 7
+ },
+ {
+  "slug": "partial-differential-equations",
+  "name": "Partial Differential Equations",
+  "missions": 110,
+  "unfinished": 53
+ },
+ {
+  "slug": "group-theory",
+  "name": "Group Theory",
+  "missions": 108,
+  "unfinished": 32
+ },
+ {
+  "slug": "cryptography",
+  "name": "cryptography",
+  "missions": 101,
+  "unfinished": 87
+ },
+ {
+  "slug": "random-matrix-theory",
+  "name": "Random Matrix Theory",
+  "missions": 98,
+  "unfinished": 50
+ },
+ {
+  "slug": "differential-geometry",
+  "name": "Differential Geometry",
+  "missions": 97,
+  "unfinished": 32
+ },
+ {
+  "slug": "optimal-transport",
+  "name": "Optimal Transport",
+  "missions": 97,
+  "unfinished": 32
+ },
+ {
+  "slug": "harmonic-analysis",
+  "name": "Harmonic Analysis",
+  "missions": 87,
+  "unfinished": 41
+ },
+ {
+  "slug": "representation-theory",
+  "name": "Representation Theory",
+  "missions": 84,
+  "unfinished": 50
+ },
+ {
+  "slug": "algebraic-geometry",
+  "name": "Algebraic Geometry",
+  "missions": 74,
+  "unfinished": 45
+ },
+ {
+  "slug": "mathematical-logic",
+  "name": "Mathematical Logic",
+  "missions": 74,
+  "unfinished": 30
+ },
+ {
+  "slug": "quantum-error-correction",
+  "name": "Quantum Error Correction",
+  "missions": 61,
+  "unfinished": 44
+ },
+ {
+  "slug": "formal-verification",
+  "name": "Formal Verification",
+  "missions": 57,
+  "unfinished": 4
+ },
+ {
+  "slug": "computational-geometry",
+  "name": "Computational Geometry",
+  "missions": 53,
+  "unfinished": 39
+ },
+ {
+  "slug": "algebraic-topology",
+  "name": "Algebraic Topology",
+  "missions": 42,
+  "unfinished": 13
+ },
+ {
+  "slug": "topology",
+  "name": "Topology",
+  "missions": 40,
+  "unfinished": 14
+ },
+ {
+  "slug": "geometry-topology",
+  "name": "Geometry & Topology",
+  "missions": 35,
+  "unfinished": 13
+ },
+ {
+  "slug": "pure-math",
+  "name": "Pure Mathematics",
+  "missions": 33,
+  "unfinished": 14
+ },
+ {
+  "slug": "quantum-mechanics",
+  "name": "Quantum Mechanics",
+  "missions": 24,
+  "unfinished": 16
+ },
+ {
+  "slug": "category-theory",
+  "name": "Category Theory",
+  "missions": 22,
+  "unfinished": 2
+ },
+ {
+  "slug": "symplectic-geometry",
+  "name": "Symplectic Geometry",
+  "missions": 17,
+  "unfinished": 4
+ },
+ {
+  "slug": "calculus-of-variations",
+  "name": "Calculus of Variations",
+  "missions": 16,
+  "unfinished": 4
+ },
+ {
+  "slug": "revenue-management-and-pricing",
+  "name": "Revenue Management and Pricing",
+  "missions": 12,
+  "unfinished": 9
+ },
+ {
+  "slug": "statistical-mechanics",
+  "name": "Statistical Mechanics",
+  "missions": 12,
+  "unfinished": 11
+ },
+ {
+  "slug": "general-relativity",
+  "name": "General Relativity",
+  "missions": 9,
+  "unfinished": 0
+ },
+ {
+  "slug": "theory-of-computation",
+  "name": "Theory of Computation",
+  "missions": 9,
+  "unfinished": 1
+ },
+ {
+  "slug": "experimental-design",
+  "name": "Experimental Design",
+  "missions": 8,
+  "unfinished": 1
+ },
+ {
+  "slug": "quantum-gravity",
+  "name": "Quantum Gravity",
+  "missions": 8,
+  "unfinished": 2
+ },
+ {
+  "slug": "logic",
+  "name": "Logic",
+  "missions": 7,
+  "unfinished": 5
+ },
+ {
+  "slug": "model-theory",
+  "name": "Model Theory",
+  "missions": 7,
+  "unfinished": 0
+ },
+ {
+  "slug": "analytic-number-theory",
+  "name": "Analytic Number Theory",
+  "missions": 6,
+  "unfinished": 3
+ },
+ {
+  "slug": "arithmetic-geometry",
+  "name": "Arithmetic Geometry",
+  "missions": 5,
+  "unfinished": 3
+ },
+ {
+  "slug": "condensed-matter-physics",
+  "name": "Condensed Matter Physics",
+  "missions": 4,
+  "unfinished": 3
+ },
+ {
+  "slug": "type-theory",
+  "name": "Type Theory",
+  "missions": 4,
+  "unfinished": 0
+ },
+ {
+  "slug": "active-inference",
+  "name": "Active Inference",
+  "missions": 2,
+  "unfinished": 0
+ },
+ {
+  "slug": "inventory-theory",
+  "name": "Inventory Theory",
+  "missions": 2,
+  "unfinished": 0
+ },
+ {
+  "slug": "metrology",
+  "name": "Metrology",
+  "missions": 2,
+  "unfinished": 1
+ },
+ {
+  "slug": "behavior",
+  "name": "Behavior",
+  "missions": 1,
+  "unfinished": 0
+ },
+ {
+  "slug": "extremal-graph-theory",
+  "name": "Extremal Graph Theory",
+  "missions": 1,
+  "unfinished": 1
+ },
+ {
+  "slug": "extremal-set-theory",
+  "name": "Extremal Set Theory",
+  "missions": 1,
+  "unfinished": 1
+ },
+ {
+  "slug": "geometrodynamics",
+  "name": "Geometrodynamics",
+  "missions": 1,
+  "unfinished": 0
+ },
+ {
+  "slug": "intelligence",
+  "name": "Intelligence",
+  "missions": 1,
+  "unfinished": 0
+ },
+ {
+  "slug": "motives",
+  "name": "Motives",
+  "missions": 1,
+  "unfinished": 0
+ },
+ {
+  "slug": "quantum-geometrodynamics",
+  "name": "Quantum Geometrodynamics",
+  "missions": 1,
+  "unfinished": 0
+ }
+]
