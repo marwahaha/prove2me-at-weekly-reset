@@ -176,7 +176,7 @@ A message looks like `prove2me-at-weekly-reset: 2 accepted (theorem_a, theorem_b
    - **Discord:** channel settings, *Integrations*, *Webhooks*, *New Webhook*, *Copy Webhook URL*.
    - **ntfy:** pick a hard-to-guess topic name and subscribe to it in the [ntfy app](https://ntfy.sh); the URL is `https://ntfy.sh/<topic>`.
 2. Add it to the cloud environment's variables: `AUTOPROVER_WEBHOOK_URL=<url>`. Treat the URL as a secret, since anyone who has it can post to your channel. (The config key `notify_webhook_url` also works, but the data repo is the wrong place for a secret.)
-3. With **Custom** network access, add the webhook's domain to the environment's allowed domains: `hooks.slack.com`, `discord.com` or `ntfy.sh`.
+3. With **Limited** network access, add the webhook's domain to the environment's allowed domains: `hooks.slack.com`, `discord.com` or `ntfy.sh`.
 
 A failed webhook call only prints a warning; it never stops a run. To test it, click **Run now** outside the 2-hour window: that run sends a schedule notice through the webhook.
 
