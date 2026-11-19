@@ -108,6 +108,7 @@ class DecisionTests(Base):
         out = json.loads(out)
         self.assertEqual((rc, out["allow_web"], out["allow_connectors"]), (0, False, False))
         self.assertIn("mcp__github__", out["builtin_mcp_prefixes"])
+        self.assertIn("mcp__ccd_session__", out["builtin_mcp_prefixes"])
         for val, want in ((True, True), ("true", False), (1, False)):  # only a real JSON true
             self.config.write_text(json.dumps({"allow_web": val}))
             self.assertEqual(json.loads(self.p2m("safety")[1])["allow_web"], want)

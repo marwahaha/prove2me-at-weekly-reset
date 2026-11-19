@@ -535,7 +535,7 @@ def cmd_renew_key(api: Api, cfg: dict, args) -> None:
     print(json.dumps({"renewed": True, "valid_until": valid}))
 
 
-BUILTIN_MCP_PREFIXES = ("mcp__github__", "mcp__claude-code-remote__")
+BUILTIN_MCP_PREFIXES = ("mcp__github__", "mcp__claude-code-remote__", "mcp__ccd_session__")
 
 
 def cmd_safety(api, cfg: dict, args) -> None:
