@@ -20,10 +20,10 @@ Read this whole file before starting. Then:
 - **Start with a short welcome**, before any check or question, in your own words and a few lines at most. Cover:
   - what the tool does: once a week, just before the user's weekly Claude limit resets, a cloud agent uses the allowance they have left to try to prove open theorems on Prove2me in Lean;
   - what setup involves: about 20 minutes, a few things they do in the browser (Claude walks them through each), the rest done by Claude;
-  - what they need: their Claude subscription, a Prove2me account and a GitHub account;
+  - what they need: their Claude subscription, a Prove2me account and a GitHub account (the free plan is enough);
   - that nothing is submitted under their name until they decide to go live at the end.
 
-  For example: "I'll help you set up prove2me-at-weekly-reset. Once a week, just before your weekly Claude limit resets, it uses the allowance you have left to try to prove open theorems on Prove2me. Setup takes about 20 minutes: you'll do a few things in your browser, and I'll walk you through each one and do the rest. You'll need your Prove2me and GitHub accounts. Nothing is submitted under your name until you decide to go live at the end. Let's start."
+  For example: "I'll help you set up prove2me-at-weekly-reset. Once a week, just before your weekly Claude limit resets, it uses the allowance you have left to try to prove open theorems on Prove2me. Setup takes about 20 minutes: you'll do a few things in your browser, and I'll walk you through each one and do the rest. You'll need your Prove2me account and a GitHub account (a free one is fine). Nothing is submitted under your name until you decide to go live at the end. Let's start."
 
 - **Never ask for, read, print or store the Prove2me API key.** The user pastes it into the cloud environment themselves. If the user pastes it into chat anyway, do not repeat it, and tell them to mint a new one, since the chat now holds it.
 - Do the **[Claude]** steps yourself. For a **[You]** step, give the user the exact clicks and the ready-to-paste values from this file, then wait until they say it is done and run the step's Check.
@@ -38,7 +38,8 @@ Read this whole file before starting. Then:
 
 - A Claude subscription (Pro, Max, Team or Enterprise) with Claude Code, and access to Claude Code on the web (claude.ai/code).
 - A [Prove2me](https://prove2.me) account.
-- A GitHub account, connected to Claude Code on the web: claude.ai/code must be able to clone your private repositories.
+- A GitHub account, connected to Claude Code on the web: claude.ai/code must be able to clone your private repositories. **GitHub's free plan is enough**: it includes unlimited private repositories, and the tool needs no paid feature.
+  - Why GitHub: each cloud run starts on an empty machine, so anything that must last between runs lives in your private data repo (step 3): your settings, the run logs (which also let runs skip theorems already tried) and the renewed Prove2me key, encrypted. The tool's own code also comes from GitHub, at its newest release.
 - Nothing to install. If the [`gh` CLI](https://cli.github.com) happens to be installed and signed in, Claude uses it to create your data repo; otherwise you create it in the browser in step 3 (about two minutes).
 
 **Check [Claude]:**

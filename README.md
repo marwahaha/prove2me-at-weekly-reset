@@ -19,6 +19,7 @@ This repository is the shared tool. Everything personal stays with you:
 | Prove2me account and API key | you |
 | **Private data repo**: your `autoprover.config.json` and run logs | you, created from [`template/`](template/) |
 | Cloud environment + routine on claude.ai | you |
+| GitHub account, connected to claude.ai/code | you; **the free plan is enough** (unlimited private repos) |
 | Scripts and agent prompt | this repo, attached to your routine next to your data repo |
 
 Proofs are submitted under your Prove2me account. Every one says at the very beginning that it was proved automatically by prove2me-at-weekly-reset, with a link to this repository: the first line of the Lean file is a comment saying so, and so is the first line of its explanation. This is not configurable.
@@ -117,6 +118,8 @@ Setup is in [SETUP.md](SETUP.md). The easiest way is to let Claude do it: paste 
 ```
 Set up prove2me-at-weekly-reset for me by following SETUP.md in github.com/sattath/prove2me-at-weekly-reset
 ```
+
+You need a Claude subscription, a Prove2me account and a GitHub account; GitHub's free plan is enough. GitHub holds what must last between runs, since each run starts on an empty cloud machine: your settings, the logs and the renewed Prove2me key (encrypted), all in your private data repo.
 
 Claude creates your private data repo, the routine and its schedule, and runs a test. You do the parts only you can do, in the browser: turn off paid extra usage, mint your Prove2me key and create the cloud environment (there is no API for that yet). Claude gives you the exact values to paste. You can also follow SETUP.md by hand; every step says who does it and how to check it.
 
