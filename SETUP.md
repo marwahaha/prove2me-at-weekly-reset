@@ -19,10 +19,12 @@ Read this whole file before starting. Then:
 
 - **Never ask for, read, print or store the Prove2me API key.** The user pastes it into the cloud environment themselves. If the user pastes it into chat anyway, do not repeat it, and tell them to mint a new one, since the chat now holds it.
 - Do the **[Claude]** steps yourself. For a **[You]** step, give the user the exact clicks and the ready-to-paste values from this file, then wait until they say it is done and run the step's Check.
+  - Spell each **[You]** step out in your message, one step at a time: what to do, where (a link), and which buttons. Never refer to a step only by its number ("are steps 1 and 2 done?"): the user has not read this file.
 - Run each step's Check first. If it passes, say so and move on.
 - Ask before anything outward-facing that this file does not already cover: creating the repo, creating or changing the routine, starting a run, and switching to live mode each need the user's yes.
 - Ask the user's choices one at a time, with a recommended default. Where the client can show clickable choices (an interactive form or a menu), use them instead of plain text.
 - If a Check fails twice, stop and tell the user what you saw. Do not improvise around it.
+- If `gh` or `git` fails with a TLS or certificate error (e.g. `OSStatus -26276`) while your shell is sandboxed, that is the sandbox, not GitHub: rerun the command outside the sandbox, with the user's approval.
 
 ## Step 0. What you need [You]
 
@@ -77,7 +79,7 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
      2. On the new repo's page, click **uploading an existing file**. Drag `autoprover.config.json` and `README.md` from the folder `<full path>` onto the page, then click **Commit changes**. (`.gitignore` can stay behind; runs never need it.)
 
 **Check:**
-- `gh` path: `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON.
+- `gh` path: `gh repo view <owner>/<name> --json visibility,defaultBranchRef` shows `PRIVATE`, and `autoprover.config.json` is on the default branch and is valid JSON. Right after the first push GitHub may still report no default branch; wait 10 seconds and check again (that does not count as a failed Check).
 - Browser path: `curl -s -o /dev/null -w '%{http_code}' https://github.com/<owner>/<name>` prints `404` (a public repo would give `200`; this is how you know it is private without signing in), and the user confirms that the repo's page lists `autoprover.config.json`.
 
 **Browser path, later steps:** you cannot push to or read the private data repo. Where steps 6 and 7 say to change `autoprover.config.json` and push, give the user the exact edit instead: open the file on GitHub, click the pencil icon, change that one line, click **Commit changes**. Where they say to read a log in the data repo, ask the user to open it and paste its text, or read the run's own output through the routine tool.
@@ -86,7 +88,11 @@ Your data repo holds your settings (`autoprover.config.json`) and the run logs. 
 
 There is no command or API for creating a cloud environment yet, so this step is in the browser. Claude shows you the values; you paste them.
 
-At [claude.ai/code](https://claude.ai/code), open the environment selector and choose **New environment** (or edit the one you already use for this tool). **Click-by-click screenshots:** [docs/environment-howto](docs/environment-howto/README.md). Fill in:
+At [claude.ai/code](https://claude.ai/code), click the environment button (a cloud icon and an environment name, just below the prompt box) and choose **+ New environment** (or edit the one you already use for this tool). **Click-by-click screenshots:** [docs/environment-howto](docs/environment-howto/README.md).
+
+Claude, if you have a browser tool (e.g. the Claude app's browser pane), filling in the form for the user is the default; in the test setup it turned "I don't understand" into one action for the user. Ask the user to sign in to claude.ai in that browser themselves. Fill in everything below except the key, leaving the first line of the environment variables empty. The setup script editor ignores typed or keyboard-pasted text; insert the script with a synthetic paste event and compare what the editor holds against `scripts/setup.sh`. Then hand over: the user types the key line and clicks **Add environment**. Don't look at the page (no screenshots, no page reads, no page text) from the moment they start typing it; afterwards, check the result from the environment list (Check below), not from the page. Never type credentials yourself, including the claude.ai sign-in. If the page doesn't match these instructions (labels changed, a menu won't open twice in a row), stop and walk the user through the screenshots instead of improvising. Without a browser tool, walk the user through the screenshots.
+
+Fill in:
 
 - **Name:** `prove2me-at-weekly-reset`.
 - **Network access: Limited.** Keep **Allow package managers** ticked, and add these allowed domains:
@@ -106,21 +112,22 @@ At [claude.ai/code](https://claude.ai/code), open the environment selector and c
   ENABLE_CLAUDEAI_MCP_SERVERS=false
   ```
   - `ENABLE_CLAUDEAI_MCP_SERVERS=false` keeps your claude.ai connectors (Gmail, Drive, Slack, ...) out of every run in this environment, even if one is attached to the routine by mistake. It is one layer of several; see step 5.
+  - The page shows a warning under this box not to add secrets. Here that is expected: tell the user before they get there. It is why the next point matters.
   - ⚠️ Environment variables are **visible to anyone who uses that environment**. On Team and Enterprise plans, use a **personal** environment, never an organization-shared one.
   - ⚠️ **This first key has two roles.** It logs in until it expires, and it is also the password that encrypts every renewed key in your data repo. **Never delete or change `PROVE2ME_CREDENTIALS`**, even after Prove2me starts rejecting the key in it, or the renewed key can no longer be read.
-  - **Optional: separate the two roles.** Add a fourth line, `AUTOPROVER_ENCRYPTION_SECRET=...`, a random secret that becomes the encryption password. Then `PROVE2ME_CREDENTIALS` may be removed after the first successful renewal, and `AUTOPROVER_ENCRYPTION_SECRET` is the variable that must stay. See *Prove2me key renewal* in the README.
+  - **Optional: separate the two roles.** Add a fifth line, `AUTOPROVER_ENCRYPTION_SECRET=...`, a random secret that becomes the encryption password. Then `PROVE2ME_CREDENTIALS` may be removed after the first successful renewal, and `AUTOPROVER_ENCRYPTION_SECRET` is the variable that must stay. See *Prove2me key renewal* in the README. Claude: mention this option in one sentence; don't make it a question the user has to answer before saving. The default is to skip it.
     - To generate it, run `python3 scripts/p2m.py new-secret` in a clone of this repo. It puts the ready-to-paste line on the clipboard (macOS, Windows, WSL and Linux desktops), or, without a clipboard, in a file only you can read, `~/autoprover-secret.txt` (delete it after pasting). It never prints the secret.
     - Claude: run that command yourself, tell the user where the line went, and never read the file or the clipboard. Don't keep any other copy: if the secret is ever lost, a fresh Prove2me key (step 2) and a new secret restore everything.
   - The environment's "network secrets" option does not fit here: it adds a fixed header, while Prove2me exchanges the key for a token in a request body.
-- **Setup script:** paste the whole of [`scripts/setup.sh`](scripts/setup.sh). (Claude: offer to copy it to the clipboard, e.g. `pbcopy < scripts/setup.sh` on macOS.)
+- **Setup script:** the whole of [`scripts/setup.sh`](scripts/setup.sh). Easiest by hand: the editor's **Choose file** button, picking `scripts/setup.sh` from a download or clone of this repo; otherwise paste it. (Claude: offer to copy it to the clipboard, e.g. `pbcopy < scripts/setup.sh` on macOS.) The editor then shows 104 lines; the file's trailing newline isn't counted, so nothing is missing.
   - The environment caches its result only if setup finishes within about 5 minutes, so the script time-boxes itself.
   - Whatever doesn't fit (usually part of the Mathlib download) is finished at the start of each run.
 
-**Check:** you confirm the environment is saved under the name above. The test run in step 6 checks the rest.
+**Check [Claude]:** the environment is listed under its name, from the routine tool's list of environments (in Claude Code, the `RemoteTrigger` tool shows the available environments with their IDs). Note its ID for step 5. Without that tool, the user confirms it is listed under **Personal** when they open the environment button again. The test run in step 6 checks the rest.
 
 ## Step 5. Routine [Claude]
 
-The routine is the scheduled cloud agent that does the work. Claude creates it with its routine tool (in Claude Code, `/schedule`; Claude can also call the routine API directly). By hand, create it at [claude.ai/code/routines](https://claude.ai/code/routines).
+The routine is the scheduled cloud agent that does the work. Claude creates it by calling the routine API directly (in Claude Code, the `RemoteTrigger` tool; load it with ToolSearch if needed). Don't run the `/schedule` skill for this: it opens with a generic heads-up (no git repo here, MCP connectors) that doesn't apply and confused the user in testing. By hand, create it at [claude.ai/code/routines](https://claude.ai/code/routines).
 
 Settings:
 
@@ -149,20 +156,49 @@ Settings:
   - Claude: run `python3 scripts/p2m.py schedule` in the tool clone. It reads the reset time from your Claude account and prints the cron line. It needs the `claude` CLI; if that fails, compute the line from the reset time the user noted in step 1.
   - If the line is wrong, the first scheduled run notices that it is outside the window and notifies you with the corrected line. The same happens if your reset time changes later.
 
-If a routine named `prove2me-at-weekly-reset` already exists, update it instead of creating a second one.
+If a routine named `prove2me-at-weekly-reset` already exists, update it instead of creating a second one. If another routine of this tool already runs on the same account under a different name, tell the user before creating this one: both would run in the same weekly slot, on the same Claude allowance and the same Prove2me account. Recommend creating the new one paused (`"enabled": false`) unless they mean to replace the old one.
 
-**Check:** the routine is listed (`/schedule list`, or the routine tool's list action) with both repositories, the environment from step 4, the cron line above, the model, the tools above, and no connectors.
+Claude, the create request (fill in the `<...>` parts; generate a fresh lowercase v4 UUID; `content` is the whole of `prompts/routine-trigger.md`):
+
+```json
+{
+  "name": "prove2me-at-weekly-reset",
+  "cron_expression": "<cron line from p2m.py schedule>",
+  "enabled": true,
+  "clear_mcp_connections": true,
+  "job_config": {"ccr": {
+    "environment_id": "<environment ID from step 4>",
+    "session_context": {
+      "model": "opus",
+      "sources": [
+        {"git_repository": {"url": "https://github.com/<owner>/<data repo>"}},
+        {"git_repository": {"url": "https://github.com/sattath/prove2me-at-weekly-reset"}}
+      ],
+      "allowed_tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "PushNotification"],
+      "disallowed_tools": ["WebSearch", "WebFetch", "mcp__github"]
+    },
+    "events": [{"data": {
+      "uuid": "<fresh uuid>", "session_id": "", "type": "user", "parent_tool_use_id": null,
+      "message": {"role": "user", "content": "<prompts/routine-trigger.md>"}
+    }}]
+  }}
+}
+```
+
+**Check:** the routine is listed (the routine tool's list or get action) with both repositories, the environment from step 4, the cron line above, the model, the tools above, and no connectors.
 
 ## Step 6. Test run [Claude]
 
 A test run goes through the whole pipeline (clone, setup, Lean, usage gate, one claim, log, notification) without submitting anything:
 
+Before starting it, tell the user in one or two sentences why nothing is submitted: the test checks the plumbing, and every new setup starts in dry run until they choose to go live (step 7). A proof it finds is not lost: it is saved in the data repo under `logs/<run_id>/`, marked `DRY_RUN_PASSED_LOCAL_CHECKS`, and the user can submit it by hand on prove2.me.
+
 1. In the data repo, set `"test_run": true` in `autoprover.config.json`, commit and push. A test run is a dry run with at most one claim, and it skips the 2-hour window rule, so it works at any time. The usage caps still apply: if your weekly usage is above 75%, the test stops early at the gate, which is a valid result.
-2. Start the routine now (**Run now** on its page, `/schedule run`, or the routine tool's run action), and give the user the run's link.
-3. When it ends (usually 10 to 45 minutes), read the run's log (the routine tool's run log, or open the run) and the new `logs/<run_id>.md` in the data repo.
+2. Start the routine now (**Run now** on its page, or the routine tool's run action), and give the user the run's link.
+3. Nothing tells you when the run ends (usually 10 to 45 minutes). Wait for the data repo commit named `autoprover run <run_id>`, or check the routine tool's list of runs. Don't stop at the first new commit: every run first commits `autoprover: renew Prove2me API key (encrypted)`, before its log exists. Then read the run's log (the routine tool's run log, or open the run) and the new `logs/<run_id>.md` in the data repo.
 4. Set `"test_run": false` again, commit and push. **Don't skip this:** while it is `true`, every run is a one-claim dry run.
 
-A healthy run shows, in order: both repositories cloned, the setup script completed (or "cached from previous run"), `p2m usage` with `"go": true`, `prepare.sh` printing `Lean + Mathlib ready`, a claim fetched and checked, then a log committed to `logs/`. Its `Mode:` line reads `TEST RUN`, and its `Stopped because:` line says why it ended.
+A healthy run shows, in order: both repositories cloned, the setup script completed (or "cached from previous run"), `p2m usage` with `"go": true`, `prepare.sh` printing `Lean + Mathlib ready`, a claim fetched and at least one Lean file compiled, then a log committed to `logs/`. Its `Mode:` line reads `TEST RUN`, and its `Stopped because:` line says why it ended.
 
 Common problems:
 
@@ -173,6 +209,8 @@ Common problems:
 | Lean or Mathlib download failed | Switch the environment's network access to **Full** (step 4). |
 | `Stopped because: ... usage ... >= cap` | Your own usage is above the caps; the gate worked. Test again when usage is lower. |
 | No log and the run ended at once with "You've hit your weekly limit" | Your weekly limit was already used up. Test after it resets. |
+| `HTTP 500` from Prove2me in the log | A temporary error on Prove2me's side. The run carries on with other candidates; nothing to fix. |
+| `unsafe routine setup: <tools> available but not allowed` | A tool set appeared that the self-check doesn't know. If it is one of your connectors or web tools, remove it (step 5). If it is a tool set built into cloud sessions, report it to the maintainers; until a release knows it, add its prefix (e.g. `mcp__example`) to the routine's `disallowed_tools`. |
 
 **A green run status only means the session ran.** Read the log to see what it actually did.
 
@@ -189,4 +227,5 @@ After reading a few dry-run logs (scheduled runs write one every week), the user
 - **Key renewal is automatic.** Each run renews the Prove2me key, so it stays valid for 30 days after the last run. Never delete the encryption password from the environment: `PROVE2ME_CREDENTIALS` (your first key), or `AUTOPROVER_ENCRYPTION_SECRET` if you added one. You need to paste a new key (steps 2 and 4) only if a run notifies you that renewal failed repeatedly, or that the key was rejected because no run renewed it for about 4 weeks.
 - **Debugging:** ask Claude Code to list the routine's runs and read a run's log; it can do this without opening claude.ai.
 - **Updates:** each run clones the tool fresh from GitHub and runs its **newest release tag** (`vYYYY.MM.DD`), not `main`. Runs can push branches but never tags (Anthropic's GitHub proxy rejects tag pushes), so code a misled run pushes is never executed by a later run. New releases reach you automatically. Only the two pasted copies do not update by themselves: the routine's prompt (step 5) and the environment's setup script (step 4). When the tool's changelog or README says one of them changed, paste it again, or ask Claude to update the routine's prompt.
-- **Releasing (maintainers):** after pushing to `main`, tag the release: `git tag v$(date -u +%Y.%m.%d) && git push origin --tags` (add `.2`, `.3` for a second release the same day). Until a tag is pushed, runs keep using the previous release. Now and then, refresh the field list that setup shows: `python3 scripts/p2m.py fields --live > data/fields.json` (needs a Prove2me key).
+- **Releasing (maintainers):** after pushing to `main`, tag the release: `git tag v$(date -u +%Y.%m.%d) && git push origin --tags` (add `.2`, `.3` for a second release the same day). Run `git fetch --tags` first: another maintainer session may already have tagged today. Until a tag is pushed, runs keep using the previous release.
+  - **Trying a fix before releasing it:** tag it `rc-YYYY.MM.DD` (anything not starting with `v`, so live runs ignore it), and in a separate test environment set `AUTOPROVER_REF=rc-YYYY.MM.DD`. Runs of a routine using that environment check out that tag instead of the newest release. Remove the variable afterwards. Only tags can be pinned, never branches, because runs can push branches. Now and then, refresh the field list that setup shows: `python3 scripts/p2m.py fields --live > data/fields.json` (needs a Prove2me key).

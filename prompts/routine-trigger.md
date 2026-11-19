@@ -19,6 +19,8 @@ Two repositories are cloned for this run: the user's private data repository (it
    ```bash
    cd "$AUTOPROVER_TOOL" && git fetch -q --tags origin 2>/dev/null
    REF="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+   # A test environment may pin a pre-release tag (e.g. rc-2026.11.19) with AUTOPROVER_REF. Tags only, never a branch.
+   [ -n "${AUTOPROVER_REF:-}" ] && REF="$AUTOPROVER_REF"
    if [ -n "$REF" ] && git checkout -q --detach "refs/tags/$REF"; then echo "tool release $REF"; else echo "NO RELEASE TAG"; fi
    ```
 

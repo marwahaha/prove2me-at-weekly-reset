@@ -55,7 +55,9 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    every cloud session; anything else is a connector), or if WebSearch or WebFetch is available
    while `p2m safety` says `"allow_web": false`. Then do not continue: run `p2m summary --needs-user --stop-reason
    "unsafe routine setup: <tool names> available but not allowed; remove them (SETUP.md
-   step 5)"`, then do steps 4 and 5 and stop.
+   step 5). If they are built into cloud sessions, report this to the maintainers and, until
+   then, add <their mcp__ prefix> to the routine's disallowed_tools"`, then do steps 4 and 5
+   and stop.
 1. Usage gate (first, before any setup): `p2m usage > .autoprover/usage.json; echo $?`.
    Then, whatever its result, keep the Prove2me key from expiring:
    `p2m renew-key > .autoprover/renew.json 2>&1; echo $?`. It mints a fresh key on every run,
@@ -88,6 +90,11 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
    reason "no eligible candidates", steps 4 and 5, stop.
 2. Pick up to `max_claims_per_run`, preferring short `statement_chars`, high `closability`, few
    `platform_imports`, and statements you can see a route to. Work on them one at a time.
+3. Test run (`test_run` is true in the config): the run exists to show that every stage works,
+   Lean included. Pick the candidate you judge easiest. Even if you then judge it infeasible,
+   compile at least one Lean file before recording it (its fetched statement, or a scratch file
+   with `import Mathlib` and `example : 2 + 2 = 4 := by norm_num`, via `lake env lean`), and say
+   in the record note whether Lean compiled.
 
 ## Step 2: per claim (at most `claim_budget_minutes` wall-clock minutes each)
 
