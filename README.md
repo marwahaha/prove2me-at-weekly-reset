@@ -4,6 +4,16 @@ A community tool for people who have both a Claude subscription and a [Prove2me]
 
 Everything runs in the cloud, as a [Claude Code routine](https://code.claude.com/docs/en/routines). No local machine is involved and nobody needs to watch it.
 
+## Requirements
+
+This tool assumes you have all three of these accounts:
+
+1. **A Claude subscription** (Pro, Max, Team or Enterprise) with access to Claude Code on the web ([claude.ai/code](https://claude.ai/code)).
+2. **A [Prove2me](https://prove2.me) account.**
+3. **A GitHub account**, connected to Claude Code on the web. The free plan is enough: it includes unlimited private repositories. GitHub holds what must last between runs, since each run starts on an empty cloud machine.
+
+Nothing needs to be installed on your computer.
+
 > **Status: early.** The maintainer is testing it on their own account first. Routines are a research-preview feature of Claude Code, so details can change. Issues and pull requests are welcome.
 
 > [!WARNING]

@@ -13,6 +13,18 @@ Every step is marked **[You]** (only you can do it, usually in a browser) or **[
 
 Total time: about 20 minutes, mostly waiting for the first test run.
 
+**Requirements.**
+
+Setup assumes you have all three of these accounts:
+
+1. **A Claude subscription** (Pro, Max, Team or Enterprise) with access to Claude Code on the web ([claude.ai/code](https://claude.ai/code)).
+2. **A [Prove2me](https://prove2.me) account.**
+3. **A GitHub account**, connected to Claude Code on the web. The free plan is enough: it includes unlimited private repositories. GitHub holds what must last between runs, since each run starts on an empty cloud machine.
+
+Nothing needs to be installed on your computer.
+
+If one is missing, create it first; Claude cannot create these accounts for you.
+
 ## Instructions for Claude
 
 Read this whole file before starting. Then:
