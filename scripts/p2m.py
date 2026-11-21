@@ -50,6 +50,7 @@ IMPORT_LINE = re.compile(r"^\s*(?:(?:public|private|meta)\s+)*import\s+([^\n]+)"
 MAX_MIRRORED_MODULES = 80
 DISCUSSION_MODES = ("off", "deadends")
 HARD_MAX_COMMENTS_PER_RUN = 5  # max_comments_per_run is clamped to this, whatever the config says
+MAX_REGISTRY_POSTS_PER_RUN = 10  # backlog cap for `p2m register`; the rest wait for the next run
 
 DEFAULT_CONFIG = {
     # Usage gate (`p2m usage`, also enforced by `check` and `submit`): work only in
@@ -86,6 +87,10 @@ DEFAULT_CONFIG = {
     # `p2m deadend` post a short templated note when a serious attempt failed.
     "discussion": "off",
     "max_comments_per_run": 2,
+    # Registry: after a proof is accepted, `p2m register` posts one line linking to it in
+    # this mission's discussion, so all proofs made with the tool can be listed in one
+    # place. "" turns it off. Live runs only; never in a dry run.
+    "registry_mission_id": "",
     # Notifications: "important" (submissions, or a stop that needs the user),
     # "every_run" (also runs that attempted claims but submitted nothing), "off".
     "notify": "important",
@@ -296,7 +301,8 @@ class Api:
         return self._http("GET", path + ("?" + urllib.parse.urlencode(params) if params else ""))
 
     def post_comment(self, mission_id: str, body_md: str, tags: list[str]) -> dict:
-        """The only comment write in the tool; called from `cmd_deadend` after every check."""
+        """The only comment write in the tool; called from `cmd_deadend` and `cmd_register`
+        after every check."""
         return self._http("POST", f"/missions/{urllib.parse.quote(mission_id, safe='')}/comments",
                           json_body={"body_md": body_md, "tags": tags}, retry=False)
 
@@ -661,6 +667,7 @@ def cmd_status(api: Api, cfg: dict, args) -> None:
         "max_submissions_per_run": cfg["max_submissions_per_run"],
         "discussion": cfg["discussion"],
         "max_comments_per_run": cfg["max_comments_per_run"],
+        "registry_mission_id": cfg.get("registry_mission_id") or None,
         "run_id": run_id(),
     }
     print(json.dumps(out, indent=2))
@@ -1740,6 +1747,68 @@ def cmd_followup(api: Api, cfg: dict, args) -> None:
     print(json.dumps({"followed_up": report, "not_looked_up": skipped}, indent=2, ensure_ascii=False))
 
 
+def registry_links(api: Api, mission_id: str) -> set[str]:
+    """Submission ids the registry mission's discussion already links to (any author)."""
+    seen: set[str] = set()
+    offset = 0
+    while True:
+        r = api.get(f"/missions/{urllib.parse.quote(mission_id, safe='')}/comments", limit=100, offset=offset)
+        comments = r.get("comments", [])
+        for c in comments:
+            for ref in c.get("references") or []:
+                if ref.get("type") in ("solution", "sketch") and ref.get("id"):
+                    seen.add(ref["id"])
+        total = (r.get("pagination") or {}).get("total")
+        offset += len(comments)
+        if not comments or (isinstance(total, int) and offset >= total):
+            return seen
+
+
+def cmd_register(api: Api, cfg: dict, args) -> None:
+    """Post one line per accepted proof (this run's and earlier runs') to the registry
+    mission's discussion, so every proof made with the tool can be listed in one place.
+    Skips proofs the discussion already links to, so re-running is harmless."""
+    mid = (cfg.get("registry_mission_id") or "").strip()
+    if not mid:
+        print(json.dumps({"status": "off", "reason": "registry_mission_id is not set"}))
+        return
+    accepted: dict = {}
+    for e in [*log_events(), *ledger()]:
+        if e.get("event") in ("result", "followup") and e.get("status") in ACCEPTED and e.get("submission_id"):
+            accepted[e["submission_id"]] = e
+    if cfg["dry_run"]:
+        print(json.dumps({"status": "dry_run", "would_consider": len(accepted)}))
+        return
+    try:
+        seen = registry_links(api, mid)
+    except RuntimeError as e:  # e.g. the mission is gone or private to someone else
+        ledger_append({"event": "register_failed", "mission_id": mid, "reason": str(e)[:300]})
+        print(json.dumps({"status": "failed", "reason": str(e)[:300]}))
+        return
+    todo = [e for sid, e in accepted.items() if sid not in seen]
+    posted, failed = [], []
+    for e in todo[:MAX_REGISTRY_POSTS_PER_RUN]:
+        sid, tid = e["submission_id"], e["theorem_id"]
+        kind = "sketch" if e["status"] == "SKETCH_ACCEPTED" else "solution"
+        verb = "Disproved" if e.get("proof_type") == "disprove" else (
+            "Reduced" if kind == "sketch" else "Proved")
+        name = (e.get("theorem_name") or tid).replace("[", "(").replace("]", ")")
+        body = (f"{verb} [{name}](p2m:theorem/{tid}): [{kind}](p2m:{kind}/{sid}), "
+                f"submitted by [prove2me-at-weekly-reset]({SOURCE_URL}).")
+        try:
+            api.post_comment(mid, body, [])
+        except RuntimeError as x:
+            failed.append({"submission_id": sid, "error": str(x)[:200]})
+            ledger_append({"event": "register_failed", "mission_id": mid, "submission_id": sid,
+                           "reason": str(x)[:300]})
+            continue
+        ledger_append({"event": "registered", "mission_id": mid, "submission_id": sid, "theorem_id": tid})
+        posted.append(sid)
+    print(json.dumps({"status": "ok", "posted": posted, "failed": failed,
+                      "already_listed": len(accepted) - len(todo),
+                      "left_for_next_run": max(0, len(todo) - MAX_REGISTRY_POSTS_PER_RUN)}, indent=2))
+
+
 def cmd_record(api: Api, cfg: dict, args) -> None:
     """Record a claim the agent gave up on (no submission), with a short reason."""
     ledger_append({"event": "result", "theorem_id": args.theorem_id, "theorem_name": args.theorem_name,
@@ -2289,6 +2358,8 @@ def main() -> None:
             s.add_argument("--explanation-file")
             s.add_argument("--poll-minutes", type=int, default=20)
     sub.add_parser("followup", help="look up final verdicts of earlier runs' pending submissions (read-only)")
+    sub.add_parser("register", help="link accepted proofs in the registry mission's discussion "
+                   "(registry_mission_id; live runs only, skips ones already linked)")
     s = sub.add_parser("record", help="record a claim abandoned without submitting")
     s.add_argument("theorem_id")
     s.add_argument("theorem_name")

@@ -17,7 +17,7 @@ your files). Each Bash call may start a fresh shell: re-export `AUTOPROVER_DATA`
 1. Secrets: never print, `cat`, `echo`, `grep` or log `credentials.json`,
    `~/.autoprover-state/access_token.json`, the access token, or the env vars
    `PROVE2ME_CREDENTIALS` and `AUTOPROVER_ENCRYPTION_SECRET`. Never put them in a file you commit.
-2. Writes to Prove2me happen ONLY via `p2m submit` and `p2m deadend`. Never call `/verify` or
+2. Writes to Prove2me happen ONLY via `p2m submit`, `p2m deadend` and `p2m register`. Never call `/verify` or
    `/comments` with curl. Never call `/submit-problem`, `/submit-definition`, or any other
    write endpoint (no other comments, replies, votes, ratings, saves, PATCHes). You may not
    create new theorems or definitions on the platform.
@@ -213,9 +213,14 @@ When the budget is spent, stop and record OUT_OF_TIME (step 2.8).
 
 Then move to the next claim. Stop after `max_claims_per_run` claims.
 
-## Step 3: summary
+## Step 3: registry, then summary
 
-`p2m summary --stop-reason "<why the run ended: e.g. finished 3 claims / no candidates /
+First `p2m register; echo $?`. If `registry_mission_id` is set, it posts one line per accepted
+proof (this run's or a followed-up one) in that mission's discussion, skipping proofs already
+linked there; otherwise, and in dry run, it does nothing. It never stops the run: whatever it
+prints, carry on. Skip it for stops before Step 2 (nothing new can have been accepted).
+
+Then `p2m summary --stop-reason "<why the run ended: e.g. finished 3 claims / no candidates /
 usage limit / submission cap / error X>"`. This writes `logs/<run_id>.md`, `logs/<run_id>.jsonl`
 and, in dry run, `logs/<run_id>/` (the would-be submissions), and prints the markdown followed
 by one line `NOTIFY: <message or NONE>`. Every `p2m summary` call is followed by steps 4 and 5.
